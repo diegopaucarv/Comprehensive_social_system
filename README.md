@@ -2,6 +2,8 @@
 
 Este es un intento de modelar un sistema realista toda una sociedad entera (compleja o simple) en Netlogo, con sus parámetros potenciales y partes fundamentales.
 
+<img width="1366" height="714" alt="Captura de pantalla_20260617_051303" src="https://github.com/user-attachments/assets/8f5c5c8a-b96c-4f3d-b688-0eabf42371ce" />
+
 ```mermaid
 graph TB
     subgraph ENV["ENTORNO: E_bio ∪ E_tech"]
@@ -206,6 +208,14 @@ graph TB
     class Acoplam,cascada,mega,mega_,igerm,laser,supersaturation dyn
 ```
 
+## Cómo ejecutar una simulación
+
+1. Abrir `abm.nlogo` en NetLogo 6.x+
+2. Elegir un botón de setup rápido (S1–S5) según la hipótesis a testear, o configurar sliders manualmente.
+3. Presionar el botón de la hipótesis y luego `go`.
+4. Observar los 4 diagramas, 7 monitores estándar y 4 monitores de diagnóstico.
+
+Puedes leer la wiki para que no estés perdido, y puedes ir al notebook [https://notebooklm.google.com/notebook/d1c3cee4-f79b-4fd2-ae6e-dae881770f87] para informarte de los conceptos básicos. El archivo `syllabus.md` sirve para que te guies de qué aprender en orden. 
 
 ### 👤 Nodos (Agentes)
 
@@ -259,13 +269,6 @@ Lo que estás viendo es el **metabolismo energético**: los agentes consumen M_E
 | 🟣🔺 Triángulos magenta dispersos | Fragmentación identitaria. Crisis de expectativas |
 | 🔵📏 Todos círculos muy pequeños | Agotamiento generalizado. dEs ≫ dEp |
 | ⭐❌ Estrellas violetas desapareciendo | Desierto terapéutico. Sin N_t, sin intervención |
-
-## Cómo ejecutar una simulación
-
-1. Abrir `abm.nlogo` en NetLogo 6.x.
-2. Elegir un botón de setup rápido (S1–S5) según la hipótesis a testear, o configurar sliders manualmente.
-3. Presionar el botón de la hipótesis y luego `go`.
-4. Observar los 4 diagramas, 7 monitores estándar y 4 monitores de diagnóstico.
 
 ### Botones de setup rápido
 
