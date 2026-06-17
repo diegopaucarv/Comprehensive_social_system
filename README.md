@@ -1,5 +1,211 @@
-# Guía de Usuario — ABM Cascada del Trauma Ecosocial v4.2
-## 🎨 Guía Visual de la Simulación
+# Guía de Usuario — Comprehensive Social System
+
+Este es un intento de modelar un sistema realista toda una sociedad entera (compleja o simple) en Netlogo, con sus parámetros potenciales y partes fundamentales.
+
+```mermaid
+graph TB
+    subgraph ENV["ENTORNO: E_bio ∪ E_tech"]
+        E_bio["E_bio: Biofisico"]
+        E_tech["E_tech: Tecnosfera"]
+        subgraph DEMO["ACOPLAMIENTO DEMOGRAFICO (parametros de frontera)"]
+            rho["ρ: densidad poblacional<br/>N / area"]
+            kappa_meso["κ_meso: capacidad de carga<br/>f(Ω_arq, Ω_sem, C_macro)"]
+            rho_crit["ρ_crit: umbral de bifurcacion<br/>f(M_E, Ω_sem, Ω_arq, C_macro)"]
+            lambda_enc["λ: tasa de encuentros<br/>f(N, ρ, Ω_red)"]
+            phi_demo["Φ_demo: disipacion migratoria<br/>Hawley + Chase-Dunn"]
+            circumsc["circunscripcion: <br/>si Φ_demo bloqueado → presion interna"]
+            regime_dem["Regimen demografico<br/>0=silencio / 1=morfogenico / 2=destructivo"]
+            vel_demo["d²N/dt²: aceleracion<br/>bifurcacion estructural"]
+        end
+    end
+
+    subgraph SIGMA["SIGMA: SISTEMA SOCIAL"]
+        subgraph MACRO["MACRO — medio: comunicacion"]
+            SRTEE["SRTEE: eventos→expectativas→persistencia"]
+            Cmacro["Cmacro: complejidad estructural"]
+            dEs["dEs/dt: frecuencia social<br/>= estructural + demografica + endógena"]
+            P_vital["P_vital: previsibilidad vital"]
+            Fop["Fop: filtro de frontera<br/>(codigo binario por subsistema)"]
+            h_acop["h: filtro F_op agregado<br/>(decrece con C_macro)"]
+            event_count["event-count: comunicaciones<br/>endogenas desde interacciones"]
+            gap_f["gap_frecuencia = dEs − dEp"]
+            gap_e["gap_expectativas = Σσ × (1−P_vital)"]
+        end
+
+        subgraph MESO["MESO — medio: interaccion + espacio"]
+            Ored["Ω_red: topologia de red<br/>(poder = centralidad)"]
+            Oarq["Ω_arq: arquitectura fisica/digital<br/>(accesibilidad del espacio)"]
+            Osem["Ω_sem: ecosfera semiotico-afectiva<br/>(valencia del espacio)"]
+            N_t["N_t: nodos terapeuticos"]
+            D_ter["D_ter: diferenciacion terapeutica"]
+            dEp_prest["dEp_prestado (TTOM)"]
+            SincEnerg["Sincronizacion Energetica<br/>Ω_red → ΔM_E"]
+            ExpTopol["Expansion Topologica<br/>Ω_sem → ΔM_Ω"]
+            SuspCont["Suspension Contingente<br/>Ω_arq → dEs/dt↓"]
+        end
+    end
+
+    subgraph PSI["PSI: SISTEMA MICRO — S = Sbio ∪ Spsych"]
+        subgraph ESTRATOS["Estratos de S"]
+            Gen["σ^gen"]
+            Epi["σ^epi (monotona ↑)"]
+            Neuro["σ^neuro"]
+            Pers["σ^pers"]
+        end
+        Gen --> Epi --> Neuro --> Pers
+
+        subgraph CORE["Variables nucleares"]
+            M_Omega["M_Ω: diversidad topologica<br/>cardinalidad de atractores"]
+            M_E["M_E: energia potencial<br/>disponible para transiciones"]
+            A_load["A_load: carga alostatica<br/>daño acumulado en Sbio"]
+            G_vuln["G_vuln: vulnerabilidad genetica<br/>⊂ Sbio, ~15% poblacion"]
+        end
+
+        subgraph SIGMA_T["σ: tensor bidimensional"]
+            s_pred["σ_pred: precision epistemica<br/>(Modelo del Mundo)"]
+            s_pref["σ_pref: precision teleologica<br/>(Modulo de Costo)"]
+        end
+
+        subgraph IOP["Iop: S × M_Ω × M_E × E → S'"]
+            Nav["Navegar: explora trayectorias"]
+            Pred["Predecir: proyecta consecuencias"]
+            Sel["Seleccionar: elige transicion"]
+        end
+        Nav --> Pred --> Sel
+
+        subgraph STATES["Estados operativos"]
+            fluid["fluid: sano, Iop activo"]
+            tight["tight: atenuado"]
+            isolated["isolated: episodico"]
+            rigid["rigid: Arigid, Lmeta"]
+        end
+
+        M_int["M-int: intencion motora<br/>{explorar, afiliar, retirar, agredir, inmovilizar}"]
+        dEp["dEp/dt: ancho de banda"]
+        sigma_apr["σ-Aprendizaje (§6.12)<br/>opera sobre σ_pred"]
+        Dev["Dev(t): trayectorias<br/>de desarrollo, T_critica"]
+        age_sigma["modulacion σ por edad<br/>(positivity effect)"]
+    end
+
+    subgraph DYNAMICS["DINAMICAS DEL SISTEMA"]
+        Acoplam["Acoplamiento M_Ω↔M_E:<br/>lim_{M_E→0} M_Ω = M_Ω_floor"]
+        cascada["CASCADA (descendente):<br/>Macro→Meso→Micro→Lmeta"]
+        mega["MEGA (ascendente):<br/>Micro→Meso→Macro"]
+        mega_["MEGA boserupiano (9.3b):<br/>densidad como gradiente<br/>morfogenico"]
+        igerm["I_germ (catastrofico):<br/>supersaturacion→transicion fase"]
+        laser["Laser Social: I_germ poblacional<br/>modulado por bifurcacion"]
+    end
+
+    subgraph INTERV["INTERVENCIONES — emergentes via N_t + σ_confianza"]
+        REBT["REBT: opera sobre σ_pred<br/>requiere N_t + σ_confianza + D_ter"]
+        Neuro["Neuromodulacion: ΔM_E<br/>requiere N_t prescriptor"]
+        MesoInt["Reconfig. Meso: Suspension<br/>requiere N_t central"]
+        Discon["Desconexion: Aislamiento<br/>Predictivo vs Reactivo"]
+    end
+
+    %% ─── ACOPLAMIENTOS ENTRE NIVELES ───
+    E_bio -->|"irrita"| PSI
+    E_bio -->|"irrita"| MESO
+    E_tech -->|"irrita"| PSI
+    E_tech -->|"irrita"| MESO
+    E_bio -.->|"X NO directo"| MACRO
+    E_tech -.->|"X NO directo"| MACRO
+
+    MACRO -->|"estructura via Fop"| MESO
+    MESO -->|"irritacion directa"| PSI
+    PSI -->|"MEGA Fase 1: fluctuacion"| MESO
+    MESO -->|"MEGA Fase 2: transduccion"| MACRO
+    PSI -->|"MEGA Fase 1 boserupiana"| MESO
+
+    %% ─── DEMOGRAFIA → RESTO DEL SISTEMA ───
+    rho -->|"via λ×h"| dEs
+    rho_crit -->|"determina regimen"| regime_dem
+    kappa_meso -->|"κ_ratio = N/κ"| regime_dem
+    lambda_enc -->|"× h × saturación Hill"| dEs
+    phi_demo -->|"ΔN si disipacion"| rho
+    circumsc -->|"bloquea"| phi_demo
+    circumsc -->|"extra-stress si bloqueo"| PSI
+    regime_dem -->|"modula boserup-mul"| mega_
+    regime_dem -->|"modula reg-mul"| SincEnerg
+    vel_demo -->|"d²N/dt² > dΩ_topo/dt"| igerm
+    vel_demo -->|"d²N/dt² > dΩ_topo/dt"| laser
+
+    %% ─── EVENTOS ENDOGENOS ───
+    PSI -->|"estado + gap"| event_count
+    event_count -->|"× h (filtro F_op)"| dEs
+
+    %% ─── SRTEE ───
+    P_vital -->|"modula"| gap_e
+    gap_e -->|"golpea canales identitarios"| s_pref
+    dEs --> gap_f
+    gap_f -->|"drena"| M_E
+    gap_e -->|"drena"| M_E
+    M_E -->|"sostiene"| M_Omega
+    Acoplam --> M_Omega
+    A_load -->|"acelera drenaje"| M_E
+    A_load -->|"degrada"| M_Omega
+
+    s_pred -->|"alimenta"| Nav
+    s_pref -->|"funcion de costo"| Sel
+    sigma_apr -->|"actualiza"| s_pred
+    Epi -->|"piso permanente"| s_pred
+    age_sigma -->|"modula"| s_pred
+
+    M_Omega -->|"requiere >1"| IOP
+    M_E -->|"requiere >0"| IOP
+    IOP -->|"consume"| M_E
+
+    N_t -->|"via σ_confianza"| REBT
+    D_ter -->|"modula efectividad"| REBT
+    N_t -->|"prescriptor"| Neuro
+    Ored -->|"habilita"| SincEnerg
+    Osem -->|"habilita"| ExpTopol
+    Oarq -->|"habilita"| SuspCont
+    SincEnerg -->|"ΔM_E"| M_E
+    ExpTopol -->|"ΔM_Ω"| M_Omega
+    SuspCont -->|"dEs/dt↓"| dEs
+
+    M_E -->|"M_E→0 fuerza"| rigid
+    M_Omega -->|"M_Ω→1"| rigid
+    G_vuln -->|"condicion necesaria"| rigid
+    Dev -->|"ventana 17-27"| M_Omega
+
+    dEp_prest -->|"reduce gap efectivo"| gap_f
+    Ored -->|"provee"| dEp_prest
+
+    igerm -->|"gatilla"| laser
+    supersaturation -->|"condicion"| igerm
+    cascada --> rigid
+    mega --> MACRO
+    mega_ --> MACRO
+
+    M_int -->|"pre-reflectivo"| IOP
+
+    %% ─── M_E → ρ_crit (histéresis) ───
+    M_E -.->|"suavizado estructural"| rho_crit
+    Oarq -->|"Ω_arq"| kappa_meso
+    Osem -->|"Ω_sem"| kappa_meso
+    Cmacro -.->|"via avg-M_Ω"| kappa_meso
+
+    classDef env fill:#e8e0d4,stroke:#8b7355,stroke-width:2px,color:#5c4a3a
+    classDef demo fill:#f5e6cc,stroke:#a67c52,stroke-width:2px,color:#5c3a1e
+    classDef macro fill:#d4e6f1,stroke:#2471a3,stroke-width:2px,color:#1a5276
+    classDef meso fill:#fef9e7,stroke:#b7950b,stroke-width:2px,color:#7d6608
+    classDef micro fill:#fdedec,stroke:#c0392b,stroke-width:2px,color:#922b21
+    classDef core fill:#f5b7b1,stroke:#922b21,stroke-width:2px
+    classDef interv fill:#d5f5e3,stroke:#1e8449,stroke-width:2px,color:#145a32
+    classDef dyn fill:#e8daef,stroke:#7d3c98,stroke-width:2px,color:#512e5f
+
+    class E_bio,E_tech env
+    class rho,kappa_meso,rho_crit,lambda_enc,phi_demo,circumsc,regime_dem,vel_demo demo
+    class SRTEE,Cmacro,dEs,P_vital,Fop,gap_f,gap_e,h_acop,event_count macro
+    class Ored,Oarq,Osem,N_t,D_ter,dEp_prest,SincEnerg,ExpTopol,SuspCont meso
+    class Gen,Epi,Neuro,Pers,s_pred,s_pref,Nav,Pred,Sel,M_int,dEp,sigma_apr,Dev,age_sigma micro
+    class M_Omega,M_E,A_load,G_vuln,fluid,tight,isolated,rigid core
+    class REBT,Neuro,MesoInt,Discon interv
+    class Acoplam,cascada,mega,mega_,igerm,laser,supersaturation dyn
+```
+
 
 ### 👤 Nodos (Agentes)
 
