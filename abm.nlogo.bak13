@@ -1,0 +1,3854 @@
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; Cascada del Trauma Ecosocial — ABM v4.0 (Refundación M_Ω/M_E + σ_pred/σ_pref)
+    ;; ─── Traducción completa desde sistema.md (v2048) ───
+
+    ;; PASO 1: Declaraciones — variables, constantes, tipos de agentes
+    ;; PASO 2: Setup — inicialización con nuevos constructos
+    ;; PASO 3: Dinámica Micro — Iop interno, daño procesado por el agente
+    ;; PASO 4: Dinámica Meso — fricción asimétrica, tres operaciones
+    ;; PASO 5: Intervenciones — mediadas por N_t y σ_confianza
+    ;; PASO 6: Macro — P_vital, gap_expectativas, transiciones de fase
+    ;;
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    extensions [nw]
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; PASO 1: DECLARACIONES GLOBALES — Variables del sistema
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    globals [
+    ;; ─── MACRO: Parámetros del sistema social ───
+    dEs-eff          ;; frecuencia social efectiva (modulada por MEGA)
+    P_vital          ;; previsibilidad vital [0,1]: alineación expectativas↔realidad
+    hp-eff           ;; probabilidad hostil efectiva (dinámica)
+    hostile?         ;; ¿el tick actual es hostil?
+
+    ;; ─── MESO: Estado de la red y el andamiaje ───
+    avg-clustering   ;; coeficiente de clustering promedio (Ω_red)
+    reg-mul          ;; multiplicador de regeneración basado en clustering
+    mega-edges       ;; conexiones MEGA creadas este tick
+    emitters         ;; agentes MEGA activos este tick
+    n-therapeutic    ;; cuántos N_t hay en la red
+
+    ;; ─── MICRO: Acumuladores para promedios poblacionales ───
+    avg-M_Omega      ;; diversidad topológica promedio
+    avg-M_E          ;; energía potencial promedio
+    avg-A_load       ;; carga alostática promedio
+    avg-thr-eff      ;; umbral efectivo promedio
+    avg-dep-eff      ;; dEp efectivo promedio
+    rigid-frac       ;; fracción de agentes en Arigid
+
+    ;; ─── DETECCIÓN DE FASE ───
+    phase-10 phase-25 phase-50
+    supersaturation  ;; fraccion de agentes cerca del colapso (I_germ)
+    germ-tick        ;; tick del ultimo evento I_germ (0 = no ha ocurrido)
+
+    ;; ─── CENSO DE ESTADOS ───
+    c-fluid c-tight c-isolated c-rigid c-cid
+    rigid-of-vuln       ;; rigid-frac normalizado por G_vuln (no diluido por inmunes)
+    distressed-frac     ;; rigid+isolated+cid / N (afectacion total, incluye no-G_vuln)
+
+    ;; ─── SRTEE: Expectativas sociales (Macro → Ω_sem) ───
+    social-exp-effort   ;; expectativa social: "esfuerzo → recompensa" [0,1]
+    social-exp-fair     ;; expectativa social: "otros → justos" [0,1]
+    social-exp-future   ;; expectativa social: "futuro → estable" [0,1]
+    social-exp-type     ;; lista de tipos: "cognitive" o "normative" para cada expectativa
+    social-exp-adherents;; cuantos agentes respaldan cada expectativa social
+    cascade-active?     ;; ¿hay una cascada inmunologica activa este tick?
+    cascade-ticks       ;; ticks restantes de la cascada inmunologica
+
+    ;; ─── MACRO: Meta-anclaje, legitimidad, ISS y Ω_sem ───
+    meta-anchor-strength ;; [0,1]: fuerza del meta-anclaje democrático (§6.5)
+    ISS-pressure         ;; [-1,1]: presión del sistema internacional (§6.5b)
+    omega-sem-decoupled  ;; true si Ω_sem está desacoplado de Ω_red (§7.1)
+    avg-link-weight      ;; peso promedio de todos los links (detección Ω_sem)
+    legitimacy-cascade   ;; true si hay cascada inmunológica de legitimidad activa
+
+    ;; ─── DEMOGRAFIA: Densidad, capacidad de carga y regimenes ───
+    current-N           ;; poblacion actual (n-agents si estatico, count turtles si dinamico)
+    rho                 ;; densidad = current-N / area
+    rho-crit            ;; umbral de densidad para bifurcacion Boserup-Durkheim (# agentes)
+    kappa-ratio         ;; current-N / kappa-meso (saturacion, >1 = sobrecapacidad)
+    regime-dem          ;; 0=silencio, 1=morfogenico, 2=destructivo
+    avg-M_E-smoothed    ;; histeresis estructural para rho_crit
+
+
+    ;; ─── DEMOGRAFIA: Acoplamiento demografico-comunicativo ───
+    lambda-encuentros   ;; tasa de encuentros potenciales (f(N, ρ, Ω_red))
+    dEs-demo            ;; contribucion demografica a dEs-eff
+    F-op-econ           ;; separatriz del canal economico (pago/no-pago)
+    F-op-pol            ;; separatriz del canal politico (voto/no-voto)
+    F-op-der            ;; separatriz del canal juridico (legal/ilegal)
+    F-op-afect          ;; separatriz del canal afectivo (emociones, co-regulacion)
+    F-op                ;; separatriz agregada para compatibilidad (media de las 4)
+    dEp-poblacional     ;; dEp agregado ponderado por edad (pirámide etaria)
+
+    ;; ─── MACRO: Generacion endogena de eventos comunicativos ───
+    event-count-econ    ;; eventos economicos generados por interacciones este tick
+    event-count-pol     ;; eventos politicos
+    event-count-der     ;; eventos juridicos
+    event-count-afect   ;; eventos afectivos
+    dEs-events          ;; contribucion endogena a dEs-eff desde interacciones entre agentes
+
+    ;; ─── DEMOGRAFIA: Velocidad y bifurcacion (Corolario E) ───
+    n-history           ;; lista de current-N ultimos 50 ticks
+    dn-dt               ;; primera derivada de current-N (tasa de cambio)
+    d2n-dt2             ;; segunda derivada (aceleracion demografica)
+    dv-topo             ;; plasticidad estructural (dΩ_topo/dt proxy)
+    bifurcation-risk    ;; 0=estable, 1=en riesgo, 2=bifurcacion activa
+
+    ;; ═══ PARÁMETROS DERIVADOS (computados en setup, no sliders) ═══
+    institutional-core-frac ;; núcleo institucional residual (§3 TIRME)
+
+    ;; ═══ INTERVENCIÓN EXTERNA DIRECTA (IED, §21.2) ═══
+    ;; ied-policy           ;; "none" | "benevolent" | "malevolent" | "restoration"
+    ied-occurred?        ;; flag
+    ied-tick             ;; tick del disparo
+    ied-phase            ;; 0=pre, 1=estabilización, 2=N_SR, 3=institucional, 4=educativa
+    ied-phase-tick       ;; tick de inicio de fase
+    edu-M_Omega-bonus    ;; bonus a M_Ω inicial post-IED
+    edu-sigma-bonus      ;; reducción a σ_pred_sh post-IED
+    edu-dEp-bonus        ;; bonus a dEp post-IED
+
+    ;; ─── Caché: grupos identitarios activos (calculado en census, usado por §22) ───
+    all-group-ids       ;; lista de group-ids únicos en la población
+
+    ;; ─── Histéresis: valores del tick anterior (para derivadas FASE 0c) ───
+    prev-avg-clustering   ;; avg-clustering en t−1
+    prev-avg-M_Omega      ;; avg-M_Omega en t−1
+    prev-avg-M_E          ;; avg-M_E en t−1
+    edu-access          ;; [0-1] probabilidad de acceder a educacion superior
+    edu-investment      ;; [0-1] inversion estatal acumulada en educacion
+    cost-of-living      ;; costo basal de existencia, emerge del mercado
+    ticks-per-year      ;; slider: cuantos ticks = 1 anio (default 6)
+    age-t-critical-end  ;; 8 anios
+    age-minor-max       ;; 18 anios
+    age-vote-min        ;; 18 anios
+    age-adult-min       ;; 20 anios
+    age-adolescent-peak ;; 20 anios
+    age-select-start    ;; 40 anios
+    age-fertile-max     ;; 67 anios
+    age-vote-max        ;; 70 anios
+    age-elder-min       ;; 70 anios
+    age-death-max       ;; 83 anios
+    ]
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; PASO 1: DECLARACIONES DE PATCH — Campo de tensión espacial (Meso)
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    patches-own [
+      tension          ;; tensión acumulada por proximidad a agentes rigid
+      accesibilidad    ;; Ω_arq: qué tan transitable es este patch [0,1]
+      valencia         ;; Ω_sem: valencia afectiva del espacio (−1 repulsión, +1 atracción)
+      patch-resources  ;; E_bio: recursos extraíbles de este patch (se regeneran lentamente)
+    ]
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; PASO 1: DECLARACIONES DE LINK — Peso del acoplamiento estructural (Ω_red ponderada)
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    links-own [
+    weight           ;; [0,1]: peso agregado del acoplamiento (media de channel-weights)
+    link-type        ;; 0=proto, 1=parentesco, 2=amistad, 3=poder, 4=publico, 5=burocratico
+    history          ;; contador de ticks sin gap alto
+    institution-link-id ;; 0=ninguna, >0 = institucion que gobierna este enlace (≠ turtle institution-id)
+    channel-weights  ;; [w-econ, w-pol, w-der, w-afect]: tensor de adyacencia tipificado
+                    ;; cada canal es independiente (§3c TIRME): Secon ∩ Spol = ∅
+    ]
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; PASO 1: DECLARACIONES DE TURTLE — Variables de cada agente (Micro)
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    turtles-own [
+    ;; ─── M_Omega: Diversidad Topológica ───
+    M_Omega          ;; cardinalidad de atractores accesibles (≥ 1)
+    M_Omega_floor    ;; suelo mínimo de M_Omega (1 para G_vuln, >1 para no-G_vuln)
+
+    ;; ─── M_E: Energía Potencial ───
+    M_E              ;; energía disponible para transiciones [0, M_E_max]
+    M_E_max          ;; energía máxima alcanzable (comprimible por A_load)
+    M_E_max_original ;; techo original sin compresión (§10 Paso 4b)
+
+    ;; ─── σ_pred: Precisión Epistémica (Modelo del Mundo) ───
+    sigma-pred-sh    ;; precisión en predicciones de amenaza (hostil)
+    sigma-pred-sr    ;; precisión en predicciones cotidianas (normal)
+    sigma-pred-social;; precisión en predicciones sobre señales sociales
+    sigma-pred-exogrupo ;; precisión en predicciones sobre señales del exogrupo (§22.5)
+
+    ;; ─── σ_pref: Precisión Teleológica (Módulo de Costo) ───
+    sigma-pref-seg   ;; costo de inseguridad (cuánto duele la amenaza)
+    sigma-pref-per   ;; costo de no-pertenencia (cuánto duele el rechazo)
+    sigma-pref-comp  ;; valor de competencia (cuánto satisface ser útil)
+
+    ;; ─── A_load: Carga Alostática ───
+    A_load           ;; daño acumulado en Sbio (independiente de M_E)
+    alpha-crit-personal ;; umbral individual de bifurcación (§heterogeneidad)
+
+    ;; ─── G_vuln: Vulnerabilidad Genética ───
+    G_vuln?          ;; ¿pertenece al subconjunto de vulnerabilidad? (boolean)
+
+    ;; ─── dEp: Capacidad de Procesamiento ───
+    dEp              ;; ancho de banda para procesar irritaciones
+    dEp_prestado     ;; capacidad prestada por el grupo (TTOM)
+
+    ;; ─── Estado operativo ───
+    state            ;; 0=fluid, 1=tight, 2=isolated, 3=rigid, 4=cid (crisis de identidad)
+    prev-state       ;; estado del tick anterior
+    iso-ticks        ;; contador de ticks en aislamiento
+    age-rigid        ;; ticks consecutivos cristalizado
+    cid-ticks        ;; ticks consecutivos en Cid
+    cid-oscillation   ;; contador de oscilacion en doble vinculo (→cid por loop)
+
+    ;; ─── Historial de procesamiento ───
+    defeat-count     ;; veces que pasó por isolated o rigid
+    last-gap-frec    ;; gap_frecuencia del tick anterior
+    last-gap-expec   ;; gap_expectativas del tick anterior
+    last-dmg         ;; daño total recibido en el tick anterior
+    extra-stress     ;; estrés adicional por fricción asimétrica este tick
+
+    ;; ─── M-int: Intención Motora ───
+    M-int            ;; 0=exploración, 1=afiliación, 2=retirada, 3=agresión, 4=inmovilización
+
+    ;; ─── Identidad y roles múltiples (§5.3 Personalización) ───
+    is-therapeutic?   ;; ¿es un N_t (nodo terapéutico)?
+    group-ids         ;; lista de grupos a los que pertenece [g1, g2, ...]
+    institution-ids   ;; lista de instituciones [i1, i2, ...]
+    identity-cohesion ;; lista paralela a group-ids: fuerza identitaria [0,1]
+    role-weights      ;; lista paralela a institution-ids: peso del rol [0,1]
+    institutional-friction ;; fricción por habitar lógicas incompatibles [0,1]
+
+    ;; ─── Desarrollo ───
+    age              ;; edad del agente en ticks (~6 ticks = 1 año, max ~500 = 85 años)
+    T_critica?       ;; esta en periodo sensible temprano? (primeros 50 ticks ~ 0-8 años)
+    early-stress     ;; estres acumulado durante T_critica (dano epigenetico)
+    sigma-epi-base   ;; piso permanente de sigma-pred-sh por adversidad temprana
+    partner-id       ;; who del partner (0 = sin pareja, para reproduccion)
+    parent-id        ;; who del padre/madre (0 = progenitor desconocido, setup inicial)
+    wealth           ;; excedente acumulado mas alla de M_E_max (capital social/material)
+
+    ;; ─── A_cog: Atipicidad Cognitiva ───
+    a-cog-type       ;; 0=tipico, 1=alta-sistematizacion, 2=social-volatil
+
+    ;; ─── N_t especializacion ───
+    nt-specialty     ;; -1=generico, 0-2=especializado en tipo de A_cog
+
+    ;; ─── Expectativas (SRTEE simplificado) ───
+    expect-effort    ;; expectativa: "esfuerzo → recompensa" [0,1]
+    expect-fair      ;; expectativa: "otros → justos" [0,1]
+    expect-future    ;; expectativa: "futuro → estable" [0,1]
+    expect-validated ;; cuantas expectativas se validaron este tick [0,3]
+    expect-type      ;; tipo de expectativa del agente: "cognitive" o "normative" (afecta como aprende)
+    anchored-expect  ;; lista: [[expect-id, anchor-type, anchor-id, strength, struct-support], ...]
+                    ;; expectativas que este agente sostiene como normativas gracias a un anclaje
+
+    ;; ─── Pred (alostasis predictiva) ───
+    gap-history      ;; lista de ultimos 5 gaps para detectar tendencia
+    M_Omega_perceived;; M_Omega filtrado por σ_pref (affordance)
+
+    ;; ─── MEGA Fase 1: anomalias cognitivas ───
+    anomaly-seed     ;; ¿tiene una proto-idea no propagada? (boolean)
+    anomaly-adopters ;; cuantos vecinos han adoptado la anomalia
+    break-memory      ;; lista de [who break-tick gap]: memoria de rupturas
+    edu-level         ;; 0=basica, 1=superior, 2=posgrado
+    children-count    ;; cuantos hijos ha tenido (max 10)
+    status-pressure    ;; presion competitiva local (densidad del grafo)
+    embodied-cap-cost   ;; costo de criar un hijo competitivo
+    edu-prod-factor     ;; productividad por educacion (calculado cada tick)
+    ]
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; PASO 2: SETUP — Inicialización del mundo con la nueva arquitectura
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    to setup
+    clear-all
+    reset-ticks
+
+    ;; ─── Inicializar globales Macro ───
+    set dEs-eff dEs
+    set hp-eff 0.25 * (dEs-eff / max (list 0.3 dEpMu))
+    set hostile? false
+    set rigid-frac 0
+
+    ;; ─── Inicializar globales Meso ───
+    set avg-clustering 0
+    set reg-mul 1.0
+    set mega-edges 0
+    set emitters 0
+    set n-therapeutic 0
+
+    ;; ─── Inicializar promedios ───
+    set avg-M_Omega 0
+    set avg-M_E 0
+    set avg-A_load 0
+    set avg-thr-eff 1.0
+    set avg-dep-eff dEpMu
+
+    ;; ─── Inicializar fases ───
+    set phase-10 -1 set phase-25 -1 set phase-50 -1
+    set supersaturation 0
+    set germ-tick 0
+
+    ;; ─── Inicializar constantes λ (Motor Cibernetico) ───
+    ;;   Si existe un slider en la interfaz, su valor tiene prioridad.
+    ;;   Si no existe (valor = 0), se usa el default calibrado.
+    if lambda-dano   = 0 [set lambda-dano   0.80]
+    if lambda-prod   = 0 [set lambda-prod   0.20]
+    if lambda-rec    = 0 [set lambda-rec    0.02]
+    if lambda-fric   = 0 [set lambda-fric   0.20]
+    if lambda-aprend = 0 [set lambda-aprend 0.05]
+    if lambda-acople = 0 [set lambda-acople 0.015]
+    if ticks-per-year = 0 [set ticks-per-year 6]
+    ;; Calendario: derivar edades de ticks-per-year
+    let t ticks-per-year
+    set age-t-critical-end    round (  8 * t)
+    set age-minor-max         round ( 18 * t)
+    set age-vote-min          round ( 18 * t)
+    set age-adult-min         round ( 20 * t)
+    set age-adolescent-peak   round ( 20 * t)
+    set age-select-start      round ( 40 * t)
+    set age-fertile-max       round ( 67 * t)
+    set age-vote-max          round ( 70 * t)
+    set age-elder-min         round ( 70 * t)
+    set age-death-max         round ( 83 * t)
+
+    ;; ─── Inicializar parametros exogenos (misma lógica: slider > default) ───
+    if g-vuln-frac       = 0 [set g-vuln-frac       0.15]
+    if atipicidad-sist   = 0 [set atipicidad-sist   0.10]
+    if atipicidad-social = 0 [set atipicidad-social 0.05]
+    if early-adversity   = 0 [set early-adversity   0.05]
+    if d-ter-frac        = 0 [set d-ter-frac        0.08]
+    if initial-pvital    = 0 [set initial-pvital    0.60]
+    if e-bio-regeneration = 0 [set e-bio-regeneration 0.05]
+    if alpha-crit        = 0 [set alpha-crit        50]
+    ;; institutional-core-frac se computa abajo, después del census inicial
+
+    ;; ─── Inicializar demografia ───
+    set current-N n-agents
+    set circumscription? false
+    set rho n-agents / (world-width * world-height)
+    ;; kappa-meso y rho-crit se computan en FASE 0b cada tick
+    set kappa-ratio n-agents / max (list 1 n-agents)  ;; placeholder, se recalcula en F0b
+    set lambda-encuentros 0
+    set dEs-demo 0
+    set F-op 0.6
+    set regime-dem 1
+    set dEp-poblacional dEpMu
+    set event-count-econ 0  set event-count-pol 0  set event-count-der 0  set event-count-afect 0
+    set dEs-events 0
+    set n-history []
+    set dn-dt 0
+    set d2n-dt2 0
+    set dv-topo 0.01
+    set bifurcation-risk 0
+
+    ;; ─── Inicializar SRTEE: expectativas sociales ───
+    ;;   initial-pvital controla el baseline institucional.
+    set social-exp-effort min (list 1.0 (initial-pvital + 0.05))
+    set social-exp-fair min (list 1.0 (max (list 0.05 (initial-pvital - 0.05))))
+    set social-exp-future min (list 1.0 initial-pvital)
+    set P_vital min (list 1.0 (initial-pvital + random-float 0.2))
+    set meta-anchor-strength min (list 1.0 (initial-pvital * 0.7))
+    set ISS-pressure 0
+    set omega-sem-decoupled false
+    set avg-link-weight 0
+    set legitimacy-cascade false
+
+    set ISS-active? false
+    set dynamic-pop? false
+    set circumscription? false
+    set seed-network? true
+
+    ;; ─── Inicializar IED (§21.2) ───
+    ifelse ied-policy = 0 [set ied-policy "none"] []
+    set ied-occurred? false
+    set ied-tick -1
+    set ied-phase 0
+    set ied-phase-tick 0
+    set edu-M_Omega-bonus 0
+    set edu-sigma-bonus 0
+    set edu-dEp-bonus 0
+    set all-group-ids []
+
+    ;; Por defecto, todas son normativas (resisten la violacion)
+    set social-exp-type ["normative" "normative" "normative"]
+    set social-exp-adherents [0 0 0]
+    set cascade-active? false
+    set cascade-ticks 0
+
+    ;; ─── Inicializar censo ───
+    set c-fluid 0 set c-tight 0 set c-isolated 0 set c-rigid 0
+    set rigid-of-vuln 0
+    set distressed-frac 0
+    set prev-avg-clustering 0 set prev-avg-M_Omega 0 set prev-avg-M_E 0
+
+    ;; ─── Construir Ω_arq: accesibilidad y valencia del espacio ───
+    ask patches [
+        ;; Accesibilidad base con ruido (simula barreras arquitectónicas)
+        set accesibilidad 0.5 + random-float 0.5
+        ;; Valencia afectiva: zonas "seguras" cerca del centro, "hostiles" en periferia
+        let dist-centro distancexy 0 0
+        set valencia (max-pxcor - dist-centro) / max-pxcor - 0.5
+        set patch-resources 2 + random-float 3  ;; recursos extraíbles del parche
+        set pcolor 0
+    ]
+
+    ;; ─── Crear agentes ───
+    create-turtles n-agents [
+        ;; Posición: anillo con jitter gaussiano
+        let theta (who / n-agents) * 360 + random-normal 0 3
+        let r 14 + random-normal 0 2
+        setxy r * sin theta  r * cos theta
+        if abs xcor > max-pxcor [set xcor max list min-pxcor min list max-pxcor xcor]
+        if abs ycor > max-pycor [set ycor max list min-pycor min list max-pycor ycor]
+        set age 20 + random 400  ;; distribucion realista: ~3-70 años
+        set T_critica? false  ;; casi nadie nace en T_critica salvo los newborns
+        set early-stress 0
+        set sigma-epi-base 0.04
+        ;; ─── Adversidad temprana exógena: fracción poblacional con σ_epi elevado en t=0 ───
+        if random-float 1 < early-adversity [
+            set sigma-epi-base 0.3 + random-float 0.5
+            set early-stress 5 + random-float 10
+            set A_load A_load + 2 + random-float 4
+        ]
+        set partner-id 0
+        set parent-id 0
+        set wealth 0
+
+        ;; ─── M_Omega: diversidad topológica inicial ───
+        set M_Omega 3 + random 5    ;; entre 3 y 8 atractores accesibles
+        set M_Omega_floor 1         ;; se sobrescribe abajo si G_vuln? = false
+
+        ;; ─── M_E: energía potencial inicial ───
+        set M_E_max mInit + abs random-normal 0 10
+        if M_E_max < 20 [set M_E_max 20]
+        if M_E_max > mInit * 1.8 [set M_E_max mInit * 1.8]
+        set M_E_max_original M_E_max
+        set M_E mInit + random-normal 0 14
+        if M_E < 20 [set M_E 20]
+        if M_E > M_E_max [set M_E M_E_max]
+
+        ;; ─── G_vuln: prevalencia de vulnerabilidad genética (parámetro exógeno) ───
+        set G_vuln? random-float 1 < g-vuln-frac
+        if not G_vuln? [
+        set M_Omega_floor 2 + random 2   ;; sin G_vuln, el suelo topológico es > 1
+        ]
+
+        ;; ─── σ_pred: precisión epistémica ───
+        set sigma-pred-sh shMu + random-normal 0 shSd
+        if sigma-pred-sh < 0.04 [set sigma-pred-sh 0.04]
+        if sigma-pred-sh > 3 [set sigma-pred-sh 3]
+        set sigma-pred-sr 0.04 + random-float 0.1
+        set sigma-pred-social 0.3 + random-float 0.4
+        set sigma-pred-exogrupo 0.3 + random-float 0.4  ;; §22.5: arranca igual que social
+
+        ;; ─── σ_pref: precisión teleológica (costos homeostáticos) ───
+        set sigma-pref-seg 0.7 + random-float 0.3   ;; la mayoría valora mucho la seguridad
+        set sigma-pref-per 0.4 + random-float 0.5   ;; variabilidad en necesidad de pertenencia
+        set sigma-pref-comp 0.3 + random-float 0.4  ;; variabilidad en valor de competencia
+
+        ;; ─── A_cog: tipo de arquitectura cognitiva (parámetro exógeno) ───
+        let r-type random-float 1
+        let tipico-threshold 1 - atipicidad-sist - atipicidad-social
+        ifelse r-type < tipico-threshold [
+        set a-cog-type 0   ;; tipico
+        ][
+        ifelse r-type < (1 - atipicidad-social) [
+        set a-cog-type 1   ;; alta-sistematizacion
+        set sigma-pred-sh max (list 0.04 (sigma-pred-sh * 0.6))
+        set sigma-pred-sr min (list 1 (sigma-pred-sr * 2.5))
+        set sigma-pred-social sigma-pred-social * 0.4
+        set dEp min (list 8 (dEp * 1.3))
+        ][
+        set a-cog-type 2   ;; social-volatil (5%): sigma_pred hiper-reactivo a senales sociales
+        set sigma-pred-social min (list 1 (sigma-pred-social * 2.5))
+        set sigma-pref-per 0.9
+        set sigma-pred-sh min (list 3 (sigma-pred-sh * 1.4))
+        if G_vuln? [set M_Omega_floor 1]  ;; con G_vuln + social-volatil, riesgo maximo de Arigid
+        ]]
+
+        ;; ─── A_load: carga alostática inicial (cero o baja) ───
+        set A_load random-float 5
+        set alpha-crit-personal alpha-crit
+
+        ;; ─── dEp: capacidad de procesamiento ───
+        set dEp dEpMu + random-normal 0 0.38
+        if dEp < 0.3 [set dEp 0.3]
+        if dEp > 8 [set dEp 8]
+        set dEp_prestado 0
+
+        ;; ─── Estado inicial ───
+        set state 0
+        set prev-state 0
+        set iso-ticks 0
+        set age-rigid 0
+        set cid-ticks 0
+        set defeat-count 0
+        set last-gap-frec 0
+        set last-gap-expec 0
+        set last-dmg 0
+        set extra-stress 0
+        set M-int 0        ;; exploratorio por defecto
+        set is-therapeutic? false
+        set group-ids []
+        set institution-ids []
+        set identity-cohesion []
+        set role-weights []
+        set institutional-friction 0
+
+        ;; ─── Expectativas iniciales (con variacion poblacional) ───
+        set expect-effort 0.5 + random-float 0.5
+        set expect-fair 0.4 + random-float 0.5
+        set expect-future 0.5 + random-float 0.4
+        set expect-validated 0
+        set anchored-expect [] ;; lista vacía: sin anclajes iniciales
+        ;; 70% de agentes tienen expectativas cognitivas (aprenden), 30% normativas (resisten)
+        set expect-type ifelse-value (random-float 1 < 0.7) ["cognitive"] ["normative"]
+
+        ;; ─── Pred: historial de gaps ───
+        set gap-history []
+        set M_Omega_perceived M_Omega
+
+        ;; ─── MEGA Fase 1: anomalias ───
+        set anomaly-seed false
+        set anomaly-adopters 0
+        set break-memory []
+        set edu-level 0
+        set children-count 0
+        set status-pressure 0
+        set embodied-cap-cost 0
+
+        ;; Apariencia
+        set shape "circle"
+        set size 0.4
+        set color 87
+    ]
+
+    ;; ─── Construir Ω_red: red Watts-Strogatz (solo si seed-network? está activo) ───
+    ;;   Si seed-network? es false, los agentes nacen aislados y Ω_red emerge
+    ;;   por percolacion desde co-presencia (FASE 0).
+    if seed-network? [
+        build-ws-network n-agents k-degree pw-rewire
+        ask links [set weight 1.0 set link-type 2 set history 10 set institution-link-id 0 set channel-weights [0.5 0.5 0.5 1.0]]
+    ]
+
+    ;; ─── Designar N_t (nodos terapeuticos): densidad inicial según d-ter-frac ───
+    ;;     Cada N_t tiene una especializacion que determina con que A_cog es efectivo
+    let n-nt max (list 1 round (n-agents * d-ter-frac))
+    ask n-of n-nt turtles with [not is-therapeutic?] [
+        set is-therapeutic? true
+        set n-therapeutic n-therapeutic + 1
+        set M_Omega 5 + random 6
+        set M_E M_E_max * 0.9
+        set sigma-pred-sh shMu * 0.5
+        set sigma-pref-comp 0.8
+        ;; Especializacion: 60% generico, 25% tipo-1, 15% tipo-2
+        let s-roll random-float 1
+        ifelse s-roll < 0.60 [set nt-specialty -1]     ;; generico
+        [ifelse s-roll < 0.85 [set nt-specialty 1]   ;; especializado en alta-sistematizacion
+            [set nt-specialty 2]]                       ;; especializado en social-volatil
+        set shape "star"
+        set size 0.5
+        set color 67
+    ]
+
+    ;; ─── Formar grupos (identidad social): distribución Poisson, múltiples membresías ───
+    ;;   La mayoría tiene 1-2 grupos. Algunos 0 (aislados), algunos 3+ (hiper-conectados).
+    ;;   Refleja la teoría de la Persona como punto de acoplamiento multi-subsistema.
+    let n-groups 5
+    ask turtles [
+        let ng min (list 3 (random 2 + random 2))  ;; aprox Poisson(1.5) truncado
+        if ng > 0 [
+            set group-ids n-of ng (range 1 (n-groups + 1))
+            set identity-cohesion n-values ng [0.3 + random-float 0.6]
+        ]
+        ;; 60% de grupos generan afiliación institucional
+        foreach group-ids [g ->
+            if random-float 1 < 0.6 [
+                set institution-ids lput g institution-ids
+                set role-weights lput (0.2 + random-float 0.6) role-weights
+            ]
+        ]
+    ]
+
+    ;; ─── Censo inicial ───
+    compute-census
+    calculate-clustering
+
+    ;; ─── Derivar institutional-core-frac del estado inicial (§3 TIRME) ───
+    ;;   Escala con desarrollo institucional (initial-pvital) y complejidad
+    ;;   societal (avg-M_Omega). Sin slider — emerge del setup.
+    if institutional-core-frac = 0 [
+        set institutional-core-frac initial-pvital * 0.25 * (1 + avg-M_Omega / 15)
+    ]
+
+    ;; ─── Basal genético: fracción de G_vuln ya están en Arigid en t=0 ───
+    ;;   Representa la prevalencia pre-existente de condiciones crónicas.
+    ;;   basal-rigid-frac: fracción de G_vuln que arrancan rígidos [0,1].
+    ;;   Default 0.10 → ~1-2 agentes por cada 100. Sin slider: fallback a 0.10.
+    let br-frac ifelse-value (basal-rigid-frac = 0) [0.10] [basal-rigid-frac]
+    let n-basal-rigid max (list 1 round (count turtles with [G_vuln?] * br-frac))
+    ask n-of n-basal-rigid turtles with [G_vuln? and state != 3] [
+        set state 3
+        set prev-state 0
+        set age-rigid random 100
+        set defeat-count 1 + random 3
+        set M_Omega 1
+        set M_Omega_floor 1
+        set M_E M_E_max * (0.1 + random-float 0.2)
+        set M-int 4
+        set A_load 20 + random-float 30
+        set alpha-crit-personal alpha-crit
+    ]
+
+    ;; ─── Renderizado inicial ───
+    ask patches [set pcolor 0]
+    color-agents
+    color-links
+    update-plots2
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; PASO 2: RED WATTS-STROGATZ (Ω_red)
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    to build-ws-network [n k p]
+    ask links [die]
+    let kh floor (k / 2)
+
+    ask turtles [
+        let i who
+        let j 1
+        while [j <= kh] [
+        let nb1 turtle ((i + j) mod n)
+        let nb2 turtle ((i - j + n) mod n)
+        if nb1 != self and not link-neighbor? nb1 [
+            create-link-with nb1 [set color 95 set thickness 0.02]
+        ]
+        if nb2 != self and not link-neighbor? nb2 [
+            create-link-with nb2 [set color 95 set thickness 0.02]
+        ]
+        set j j + 1
+        ]
+    ]
+
+    ask turtles [
+        let i who
+        let j 1
+        while [j <= kh] [
+        let nb turtle ((i + j) mod n)
+        if link-with nb != nobody and random-float 1 < p [
+            ask link-with nb [die]
+            let candidates other turtles with [not link-neighbor? myself]
+            if any? candidates [
+            let new-tgt one-of candidates
+            create-link-with new-tgt [set color 95 set thickness 0.02]
+            ]
+        ]
+        set j j + 1
+        ]
+    ]
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; PASO 3: GO — Motor de simulación con Iop interno por agente
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    to go
+    compute-census
+
+    ;; ─── FASE 0b: COMPUTO DEMOGRAFICO (ρ, κ_meso, ρ_crit, λ, h, dEs-demo, dEp-pob, regimen) ───
+    ;;   ρ = densidad; κ_meso = capacidad de carga (Hawley); ρ_crit = umbral de bifurcacion
+    ;;   λ = tasa de encuentros potenciales; h = filtro F_op (decrece con C_macro);
+    ;;   dEs-demo = contribucion demografica a dEs-eff; dEp-pob = procesamiento agregado
+    ;;   regimen = clasificacion del estado demografico (Corolario D SFD)
+    set current-N pop
+    set rho current-N / (world-width * world-height)
+    ;; kappa-meso = rho-crit evaluado en M_E maximo (capacidad de carga ideal)
+    let val-mean (mean [valencia] of patches + 0.5)
+    if val-mean < 0 [set val-mean 0] if val-mean > 1 [set val-mean 1]
+    let arq-mean mean [accesibilidad] of patches
+    let cmacro-proxy min (list 1 (avg-M_Omega / 10))
+    let kappa-meso max (list 10 (30 + arq-mean * 60 + val-mean * 40 + cmacro-proxy * 20))
+    ;; rho_crit usa M_E suavizado (histéresis) para el umbral de bifurcación
+    let me-factor avg-M_E-smoothed / max (list 1 mInit)
+    if me-factor > 1 [set me-factor 1]
+    set rho-crit max (list 8 (25 * me-factor + 20 * val-mean + 30 * arq-mean + 15 * cmacro-proxy))
+    set kappa-ratio current-N / max (list 1 kappa-meso)
+    set lambda-encuentros calc-lambda-encuentros
+    ;; F_op por canal (§3c): cada subsistema funcional tiene su propia separatriz
+    ;;   §fix: cuando las instituciones colapsan, la economía informal CRECE.
+    ;;   El floor de F_op sube con (1 − meta-anchor).
+    let f-op-factor min (list 1 (avg-M_Omega / 10))
+    let informal-boost (1 - meta-anchor-strength) * 0.4
+    set F-op-afect max (list (0.25 + informal-boost) (0.6 - f-op-factor * 0.2))
+    set F-op-econ  max (list (0.15 + informal-boost) (0.6 - f-op-factor * 0.45 - (1 - avg-M_E / max (list 1 mInit)) * 0.2))
+    set F-op-pol   max (list (0.15 + informal-boost) (0.6 - f-op-factor * 0.45 - (1 - meta-anchor-strength) * 0.3))
+    set F-op-der   max (list (0.15 + informal-boost) (0.6 - f-op-factor * 0.45 - (1 - meta-anchor-strength) * 0.2))
+    ;; F_op agregado para compatibilidad con el resto del modelo
+    set F-op (F-op-econ + F-op-pol + F-op-der + F-op-afect) / 4
+    ;; dEs-demo con saturacion tipo Hill: cuando λ es pequeno, dEs-demo ≈ lineal;
+    ;; cuando λ es grande, dEs-demo → dEs × h (acotado por el filtro, no por un tope arbitrario)
+    let K 50  ;; constante de semisaturacion: λ = K → dEs-demo alcanza la mitad de su maximo
+    set dEs-demo dEs * (lambda-encuentros / (lambda-encuentros + K)) * F-op
+    ;; promedio suavizado de M_E para ρ_crit (histéresis estructural — evita falsos positivos
+    ;; por fluctuaciones instantáneas de M_E cuando agentes colapsan en masa)
+    set avg-M_E-smoothed avg-M_E-smoothed * 0.95 + avg-M_E * 0.05
+    set dEp-poblacional calc-dEp-poblacional
+    set regime-dem calc-demo-regime
+
+    ;; Mercado: costo de vida emerge de productividad + complejidad
+    let avg-prod mean [dEp * edu-prod-factor] of turtles
+    set cost-of-living max (list (lambda-prod * 0.15) (avg-prod * 0.35))
+    ask turtles [
+        set embodied-cap-cost cost-of-living * (1 + edu-level * 0.5)
+    ]
+
+    ;; ─── FASE 0c: VELOCIDAD DEMOGRAFICA Y RIESGO DE BIFURCACION (Corolario E) ───
+    ;;   dN/dt, d²N/dt², y plasticidad estructural.
+    ;;   La bifurcacion ocurre cuando la aceleracion demografica supera
+    ;;   la capacidad de reconfiguracion del sistema.
+    set n-history lput current-N n-history
+    if length n-history > 50 [set n-history but-first n-history]
+    if length n-history >= 5 [
+        let n-prev item (length n-history - 5) n-history
+        let n-curr last n-history
+        set dn-dt (n-curr - n-prev) / 5
+        if length n-history >= 10 [
+        let n-older item (length n-history - 10) n-history
+        set d2n-dt2 (dn-dt - (n-prev - n-older) / 5) / 5
+        ]
+    ]
+    ;; Plasticidad estructural: proxy basado en clustering + M_Omega + M_E_rate
+    ;;   §fix: usa prev-* globals en vez de [var] of turtles (que siempre retornaba el mismo valor)
+    let d-clustering-dt ifelse-value (prev-avg-clustering > 0) [avg-clustering - prev-avg-clustering] [0]
+    let d-momega-dt ifelse-value (prev-avg-M_Omega > 0) [avg-M_Omega - prev-avg-M_Omega] [0]
+    let d-me-dt ifelse-value (prev-avg-M_E > 0) [avg-M_E - prev-avg-M_E] [0]
+    set dv-topo max (list 0.005 (abs d-clustering-dt + abs d-momega-dt * 0.1 + abs d-me-dt * 0.01))
+    ;; Riesgo de bifurcacion: d²N/dt² vs dv-topo + dM_E/dt
+    let threshold-bif abs dv-topo + abs d-me-dt * 0.5
+    ifelse abs d2n-dt2 > threshold-bif * 2 [
+        set bifurcation-risk 2  ;; bifurcacion activa
+    ] [
+        ifelse abs d2n-dt2 > threshold-bif [
+        set bifurcation-risk 1  ;; en riesgo
+        ] [
+        set bifurcation-risk 0  ;; estable
+        ]
+    ]
+
+    ;; ─── FASE 0: Sorteo hostil y actualización de P_vital ───
+    set rigid-frac c-rigid / max (list 1 current-N)
+    ;;   Hostilidad emerge del gap dEs/dEp + rigid-frac. Sin slider externo.
+    set hp-eff min (list 1.0 (0.25 * (dEs-eff / max (list 0.3 dEpMu)) + 0.30 * rigid-frac))
+    if hp-eff > 1 [set hp-eff 1]
+    if hp-eff < 0 [set hp-eff 0]
+    set hostile? random-float 1 < hp-eff
+
+    ;; ─── §22.5: Estereotipos — inflar σ_pred_exogrupo por segregación ───
+    update-stereotype
+    ;; ─── §22.6: Demonización — ruido Q vectorizado sobre minorías ───
+    if hostile? [apply-demonization]
+
+    ;; ─── SRTEE: Expectativas sociales — validacion, violacion, e histeresis ───
+    ;;   Las expectativas sociales son estructuras que persisten a traves de eventos.
+    ;;   Este tick genera "eventos" (hostil? es un evento; P_vital bajo es un evento).
+    ;;   Cada expectativa social se compara con el resultado y se actualiza segun su tipo.
+
+    ;; Contar adherentes (agentes cuya expectativa individual se alinea con la social)
+    let adh-effort count turtles with [abs (expect-effort - social-exp-effort) < 0.2]
+    let adh-fair count turtles with [abs (expect-fair - social-exp-fair) < 0.2]
+    let adh-future count turtles with [abs (expect-future - social-exp-future) < 0.2]
+    set social-exp-adherents (list adh-effort adh-fair adh-future)
+
+    ;; Determinar si cada expectativa social fue validada o violada este tick
+    ;; Esfuerzo→recompensa: validada si rigid-frac < 10% (antes 20% — inalcanzable)
+    let exp1-ok rigid-frac < 0.10
+    ;; Justicia: validada si gap no es extremo o P_vital aun respira
+    let exp2-ok (dEs-eff - dEp-poblacional < 2.0) or P_vital > 0.4
+    ;; Futuro estable: validado si hay meta-anclaje o P_vital alto
+    let exp3-ok meta-anchor-strength > 0.15 or P_vital > 0.5
+
+    ;; Actualizar expectativas sociales segun su tipo (cognitiva vs normativa)
+    let update-rate 0.01
+    let cascade-triggered false
+
+    ;; Expectativa 1: esfuerzo→recompensa
+    ifelse item 0 social-exp-type = "cognitive" [
+        ;; Cognitiva: aprende del resultado
+        ifelse exp1-ok [
+        set social-exp-effort min (list 1 (social-exp-effort + update-rate))
+        ][
+        set social-exp-effort max (list 0.1 (social-exp-effort - update-rate * 3))
+        ]
+    ][
+        ;; Normativa: resiste la violacion; si es violada, desata cascada inmunologica
+        if not exp1-ok [
+        set cascade-triggered true
+        ]
+        ;; Pero si es validada consistentemente, se refuerza
+        if exp1-ok [
+        set social-exp-effort min (list 1 (social-exp-effort + update-rate * 0.5))
+        ]
+    ]
+
+    ;; Expectativa 2: justicia
+    ifelse item 1 social-exp-type = "cognitive" [
+        ifelse exp2-ok [
+        set social-exp-fair min (list 1 (social-exp-fair + update-rate))
+        ][
+        set social-exp-fair max (list 0.1 (social-exp-fair - update-rate * 3))
+        ]
+    ][
+        if not exp2-ok [set cascade-triggered true]
+        if exp2-ok [set social-exp-fair min (list 1 (social-exp-fair + update-rate * 0.5))]
+    ]
+
+    ;; Expectativa 3: futuro estable
+    ifelse item 2 social-exp-type = "cognitive" [
+        ifelse exp3-ok [
+        set social-exp-future min (list 1 (social-exp-future + update-rate))
+        ][
+        set social-exp-future max (list 0.1 (social-exp-future - update-rate * 3))
+        ]
+    ][
+        if not exp3-ok [set cascade-triggered false]
+        if exp3-ok [set social-exp-future min (list 1 (social-exp-future + update-rate * 0.5))]
+    ]
+
+    ;; Cascada inmunologica: cuando una expectativa normativa es violada,
+    ;;   el sistema genera eventos ADICIONALES para reafirmarla (§2.1)
+    ifelse cascade-triggered and cascade-ticks = 0 [
+        set cascade-active? true
+        set cascade-ticks 3 + random 4    ;; la cascada dura 3-6 ticks
+    ][
+        if cascade-ticks > 0 [
+        set cascade-ticks cascade-ticks - 1
+        if cascade-ticks = 0 [set cascade-active? false]
+        ]
+    ]
+
+    ;; Durante la cascada, los agentes reciben un pulso adicional de estres.
+    ;;   NO se modifica dEs-eff permanentemente; el pulso es transitorio.
+    ;;   Los agentes normativos son los mas afectados (reafirman la norma).
+    if cascade-active? [
+        ask turtles [
+        ;; Pulso transitorio: añade estres solo por este tick
+        set extra-stress extra-stress + 0.3
+        ;; Los agentes normativos contribuyen activamente a la cascada
+        if expect-type = "normative" [
+            set extra-stress extra-stress + 0.15
+            set M_E max (list 0 (M_E - 0.15))
+        ]
+        ]
+    ]
+
+    ;; Histeresis: cuantos mas adherentes, mas lento cambia la expectativa
+    ;;   (las estructuras sociales son pegajosas)
+    let total-adh sum social-exp-adherents
+    if total-adh > current-N * 0.6 [
+        ;; Alta adhesion → las expectativas se vuelven mas normativas
+        if random-float 1 < 0.02 [
+        let change-idx random 3
+        set social-exp-type replace-item change-idx social-exp-type "normative"
+        ]
+    ]
+
+    ;; ─── Dinámica de expectativas ancladas: verificar si los anclajes siguen activos ───
+    ;;   §2.1 — anclaje de expectativas: una expectativa normativa sostenida
+    ;;   por un anclaje (persona, institucion, programa) revierte a cognitiva
+    ;;   si el anclaje falla.
+    ask turtles [
+        if not empty? anchored-expect [
+        let new-anchored []
+        foreach anchored-expect [pair ->
+            let expect-id item 0 pair
+            let anchor-type item 1 pair
+            let anchor-id item 2 pair
+            let strength item 3 pair
+            let struct-supp item 4 pair
+            let anchor-alive false
+            ;; Verificar si el anclaje sigue activo
+            if anchor-type = "person" [
+            set anchor-alive any? turtles with [who = anchor-id and state != 3]
+            ]
+            if anchor-type = "program" or anchor-type = "institution" [
+            set anchor-alive (strength > 0.15)
+            ]
+            if anchor-type = "project" [
+            ;; El proyecto sigue vivo si todos los involucrados aún creen
+            set anchor-alive (strength > 0.2)
+            ]
+            ifelse anchor-alive and strength > 0.15 [
+            ;; Anclaje activo → la expectativa sigue siendo normativa
+            set expect-type "normative"
+            set new-anchored lput pair new-anchored
+            ] [
+            ;; Anclaje falló → la expectativa revierte a cognitiva
+            set expect-type "cognitive"
+            ;; La expectativa específica cae (aprende de la decepción)
+            if expect-id = 0 [set expect-effort max (list 0.1 (expect-effort * 0.5))]
+            if expect-id = 1 [set expect-fair max (list 0.1 (expect-fair * 0.5))]
+            if expect-id = 2 [set expect-future max (list 0.1 (expect-future * 0.5))]
+            ]
+        ]
+        set anchored-expect new-anchored
+        ]
+    ]
+
+    ;; ─── FASE 0d: META-ANCLAJE, ISS Y DETECCIÓN DE Ω_sem DESACOPLADO ───
+    ;;   §6.5: meta-anclaje democrático — reduce gap por conflicto entre anclajes
+    ;;   §6.5b: ISS — presión externa modula la estabilidad del régimen
+    ;;   §7.1: Ω_sem desacoplado — polarización sin líderes cuando la red colapsa
+
+    ;; Resetear cascada de legitimidad del tick anterior
+    set legitimacy-cascade false
+
+    ;; Meta-anclaje: fuerza basada en cuantos agentes con anclajes activos
+    ;;   y expectativas normativas sostienen el sistema.
+    ;;   §fix: distinguir anclajes institucionales (peso 1.0) de personales
+    ;;   (peso 0.3). Los anclajes personales puros son ambiguos: pueden ser
+    ;;   solidaridad democrática O dependencia autoritaria.
+    let inst-anchors count turtles with [
+        not empty? (filter [p -> item 1 p = "institution"] anchored-expect)
+        and expect-type = "normative"
+    ]
+    let person-anchors count turtles with [
+        not empty? (filter [p -> item 1 p = "person"] anchored-expect)
+        and expect-type = "normative"
+        and empty? (filter [p -> item 1 p = "institution"] anchored-expect)
+    ]
+    let potential-meta max (list 1 current-N)
+    let meta-raw (inst-anchors + person-anchors * 0.3) / potential-meta
+    ;; El meta-anclaje también depende de la confianza en las instituciones.
+    ;; Opción B: solo cuentan agentes con M_E > 10 — sin energía no hay
+    ;; participación real en la institución. Un zombi no valida el sistema.
+    let institutional-trust count turtles with [not empty? institution-ids and M_E > 10] / max (list 1 current-N)
+    set meta-anchor-strength meta-raw * 0.6 + institutional-trust * 0.4
+    ;; §fix: sin floor artificial. El meta-anclaje puede llegar a 0.
+    ;; El institutional-core-frac es el único freno estructural.
+    if meta-anchor-strength > 1 [set meta-anchor-strength 1]
+
+    ;; ISS: competencia entre meta-anclajes (§6.5b)
+    ;;   Γ_ISS = presión externa observable − aliados. Media móvil lenta.
+    ;;   Efecto sobre M_E del régimen, NO sobre meta-anchor directamente.
+    ;;   Solo opera cuando las capas internas han fallado (meta < 0.3).
+    ;;   MAD: el régimen resiste si tiene suficiente M_E interno.
+    if ISS-active? [
+        let rigid-prominence count turtles with [state = 3] / max (list 1 current-N)
+
+        ;; 1. Señal observable: fracción rígida (proxy de ‖Sigma_i capturado‖)
+        let pi-ext rigid-prominence
+
+        ;; 2. Γ_ISS: consenso multilateral como media móvil lenta (diplomacia)
+        set ISS-pressure ISS-pressure * 0.95 + pi-ext * 0.05
+        set ISS-pressure max (list -0.5 (min (list 0.5 ISS-pressure)))
+
+        ;; 3. Efecto del ISS: solo cuando capas internas fallaron (último recurso)
+        if meta-anchor-strength < 0.3 [
+            ;; Γ_ISS > 0 → presión externa drena M_E de extractores y élite rígida
+            if ISS-pressure > 0.1 [
+                ask turtles with [state = 3 or M_E > M_E_max * 0.6] [
+                    set M_E max (list 0 (M_E - ISS-pressure * M_E_max * 0.015))
+                ]
+            ]
+            ;; Γ_ISS < 0 → aliados externos inyectan M_E al régimen (consolidación)
+            if ISS-pressure < -0.1 [
+                ask turtles with [state = 3] [
+                    set M_E min (list M_E_max (M_E + abs ISS-pressure * M_E_max * 0.008))
+                ]
+            ]
+            ;; MAD: si la élite retiene >40% de M_E pese a la presión → stalemate
+            ;;   El ISS no tiene más poder que el sistema local → equilibrio
+        ]
+
+        if not ied-occurred? and ied-policy != "none"
+           and rigid-prominence > 0.50 and meta-anchor-strength < 0.03 and current-N > 30 [
+            execute-ied
+        ]
+    ]
+
+    ;; ─── §22.7: Cooptación — absorber líderes disidentes si Γ_ISS > 0 ───
+    apply-cooptation
+
+    ;; Educacion: las democracias invierten, los autoritarismos desinvierten
+    if meta-anchor-strength > 0.4 and P_vital > 0.3 [
+        set edu-investment min (list 1.0 (edu-investment + 0.0002))
+        set edu-access min (list 0.70 (edu-access + 0.00005))
+    ]
+    if meta-anchor-strength < 0.2 [
+        set edu-investment max (list 0.0 (edu-investment - 0.0003))
+        set edu-access max (list 0.08 (edu-access - 0.0001))
+    ]
+    if edu-investment < 0.01 [
+        set edu-access max (list 0.08 (edu-access - 0.00005))
+    ]
+
+    ;; ─── §22.4: Filtro electoral MEGA — reducir oferta de liderazgo a N ≤ 2 ───
+    apply-mega-electoral-filter
+
+    ;; Ω_sem desacoplado: detectar régimen de polarización sin líderes
+    set avg-link-weight ifelse-value (count links > 0) [mean [weight] of links] [0]
+    let has-leaders any? turtles with [
+        state != 3 and count link-neighbors > 3
+        and [M_E] of self > [M_E_max] of self * 0.5
+    ]
+    set omega-sem-decoupled (
+        avg-link-weight < 0.2 and
+        dEs-eff > dEp-poblacional * 1.5 and
+        not has-leaders
+    )
+
+    ;; ─── Disolución institucional (§colapso endógeno) ───
+    ;;   Dos gatillos, tasas proporcionales a la distancia al umbral:
+    ;;   • meta-anchor < 0.15: abandono lento (máx 1.5%/tick)
+    ;;   • P_vital < 0.3 + M_E agotado: abandono por realidad (máx 2%/tick)
+    ;;   Floor: institutional-core-frac mantiene el núcleo institucional.
+    ;;   Sin slider → default = initial-pvital × 0.25 (5-25% según desarrollo).
+    let inst-survivors count turtles with [not empty? institution-ids]
+    let inst-floor round (current-N * institutional-core-frac)
+    if meta-anchor-strength < 0.15 and inst-survivors > inst-floor [
+        let rate (0.15 - meta-anchor-strength) / 0.15 * 0.015
+        ask turtles with [not empty? institution-ids] [
+            if random-float 1 < rate [
+                set institution-ids []
+                set role-weights []
+            ]
+        ]
+    ]
+    ;; §fix: el pathway P_vital ahora respeta institutional-core-frac.
+    ;;   Solo disuelve instituciones si hay excedente sobre el núcleo mínimo.
+    if P_vital < 0.3 [
+        if inst-survivors > inst-floor [
+            ask turtles with [not empty? institution-ids and M_E < M_E_max_original * 0.3] [
+                let rate (0.3 - P_vital) / 0.3 * 0.02
+                if random-float 1 < rate [
+                    set institution-ids []
+                    set role-weights []
+                ]
+            ]
+        ]
+    ]
+
+    ;; ─── P_vital emerge de la alineacion entre expectativas sociales y realidad ───
+    let expect-pvital 0
+    if exp1-ok [set expect-pvital expect-pvital + 1]
+    if exp2-ok [set expect-pvital expect-pvital + 1]
+    if exp3-ok [set expect-pvital expect-pvital + 1]
+    set expect-pvital expect-pvital / 3
+    ;; Tambien incorpora las expectativas individuales validadas
+    let total-validated sum [expect-validated] of turtles
+    let max-possible current-N * 3
+    let indiv-pvital total-validated / max-possible
+    ;; P_vital = 50% social + 20% individual + 10% inercia - penalizaciones
+    ;;   §fix: penalización aumentada (0.02→0.15), meta-anclaje incluido.
+    set P_vital max (list 0.01 (
+        P_vital * 0.1 +
+        expect-pvital * 0.5 +
+        indiv-pvital * 0.2
+        - rigid-frac * 0.15
+        - (1 - meta-anchor-strength) * 0.1
+    ))
+    if P_vital > 1 [set P_vital 1]
+
+    ;; FASE 0 (previa): regeneración de recursos ambientales
+    ;;   §fix: ceiling deriva de e-bio-regeneration, no hardcodeado en 5.
+    let patch-ceiling 3 + e-bio-regeneration * 40
+    ask patches [
+      set patch-resources min (list patch-ceiling (patch-resources + e-bio-regeneration))
+    ]
+
+    ;; ─── FASE 0: PROTO-INTERACCIÓN DESDE CO-PRESENCIA (génesis de Ω_red) ───
+    ;;   Dos agentes en el mismo patch sin link previo pueden generar
+    ;;   un proto-lazo si ambos tienen gap > 0 o M_E bajo.
+    ;;   La probabilidad depende del gap promedio, la accesibilidad del patch,
+    ;;   y la necesidad de apoyo social.
+    ;;   Esto implementa la Fase 0 de percolación: Ω_red nace de la colisión
+    ;;   espacial, no preexiste (§3 TIRME — Génesis de Ω_red).
+    ask turtles with [count link-neighbors = 0] [
+        let candidates other turtles-here with [count link-neighbors = 0]
+        if any? candidates [
+        let target one-of candidates
+        let avg-gap (abs (last-gap-frec) + abs ([last-gap-frec] of target)) / 2
+        let acc [accesibilidad] of patch-here
+        let need (1 - M_E / max (list 1 M_E_max)) * 0.3
+        ;; Diferencia de expectativas: la homofilia atrae
+        let exp-diff abs (expect-effort - [expect-effort] of target) / 2
+        let age-openness exp(-((age - age-adolescent-peak) ^ 2) / (4000 / 36 * ticks-per-year ^ 2))
+        let p-chain min (list 1 (age-openness * 0.20 + acc * 0.10 + (1 - abs exp-diff) * 0.15 - need * 0.20))
+        ;; Cooldown post-ruptura: no reconectar inmediatamente
+        let recent filter [b -> item 0 b = [who] of target] break-memory
+        if not empty? recent [
+            let brk first recent
+            let cooldown item 2 brk * 150
+            if ticks - item 1 brk < cooldown [set p-chain 0]
+        ]
+        if random-float 1 < p-chain [
+            create-link-with target [
+            set weight 0.3
+            set link-type 0
+            set history 0
+            set institution-link-id 0
+            set channel-weights [0.2 0.1 0.1 0.5]
+            ]
+            ;; El gasto energético de crear un lazo
+            set M_E max (list 0 (M_E - 1))
+        ]
+        ]
+    ]
+
+    ;; ─── FASE 1: FRICCIÓN ASIMÉTRICA (reemplaza el modelo de contagio) ───
+    ;;     §6.2 Corolario C: el rígido no "emite" estrés; externaliza el costo
+    ;;     de la interacción hacia el flexible, que paga el trabajo computacional
+    ask turtles [set extra-stress 0]
+    ask links [
+        let a end1 let b end2
+        let state-a [state] of a let state-b [state] of b
+
+        ;; Solo hay fricción cuando los estados son asimétricos
+        if state-a != state-b [
+        ;; ─── Ω_arq: el entorno fisico modula la probabilidad de friccion ───
+        ;;   En zonas de baja accesibilidad, la interaccion es menos probable
+        let acc-a [accesibilidad] of [patch-here] of a
+        let acc-b [accesibilidad] of [patch-here] of b
+        let encounter-prob (acc-a + acc-b) / 2
+        if random-float 1 > encounter-prob [stop]  ;; la arquitectura bloquea el encuentro
+        ;; El que está PEOR externaliza el costo; el que está MEJOR lo paga
+        let gap-a abs ([last-gap-frec] of a)
+        let gap-b abs ([last-gap-frec] of b)
+        let friction abs (gap-a - gap-b) * lambda-fric
+
+        if state-a = 3 and state-b != 3 [
+            ask b [set extra-stress extra-stress + friction]
+        ]
+        if state-b = 3 and state-a != 3 [
+            ask a [set extra-stress extra-stress + friction]
+        ]
+        ;; Coerción bidireccional: ambos tight → ambos pierden (A_hostil)
+        if state-a = 1 and state-b = 1 [
+            ask a [set extra-stress extra-stress + friction * 0.5]
+            ask b [set extra-stress extra-stress + friction * 0.5]
+        ]
+        ]
+    ]
+
+    ;; ─── FASE 2-3: PROCESAMIENTO INTERNO POR AGENTE (Iop) ───
+    ;;     Cada agente evalúa sus irritaciones usando SUS PROPIOS parámetros.
+    ;;     Esto restaura la clausura operativa: el motor provee irritación;
+    ;;     el agente decide cuánto daño le hace.
+    let sum-thr 0 let sum-dep 0 let active 0
+
+    ask turtles [
+        ;; ─── Desarrollo: edad, T_critica, ventana de vulnerabilidad ───
+        set age age + 1
+        ;; Periodo sensible temprano (primeros 50 ticks)
+        ifelse age <= 50 [set T_critica? true] [set T_critica? false]
+
+        ;; ─── Calcular umbrales efectivos ───
+        ;;   λ_acople gobierna la compresión del umbral. Base = 1.0.
+        ;;   Sin slider externo — el umbral EMERGE del acoplamiento sistema↔entorno.
+        let dep-eff dEp * (1 - lambda-acople * 100 * rigid-frac)
+        let deg-norm sum [weight] of my-links / max (list 1 current-N)
+        let isolation-penalty ifelse-value (count link-neighbors = 0) [0.7] [1.0]
+        let thr-eff 1.0 * (1 - lambda-acople * 20 * (dEs-eff / max (list 0.3 dEpMu))) * (1 - lambda-acople * 20 * deg-norm) * isolation-penalty
+
+        set sum-thr sum-thr + thr-eff
+        set sum-dep sum-dep + dep-eff
+        set active active + 1
+
+        ;; ─── dEp_prestado: capacidad del grupo (TTOM, §5.3), multi-grupo ───
+        let total-borrowed 0
+        foreach group-ids [g ->
+            let idx position g group-ids
+            let cohesion ifelse-value (idx != false) [item idx identity-cohesion] [0.5]
+            ask my-links [
+                let other-link ifelse-value (end1 = myself) [end2] [end1]
+                if member? g [group-ids] of other-link [
+                    set total-borrowed total-borrowed + weight * cohesion
+                ]
+            ]
+        ]
+        set dEp_prestado total-borrowed * 0.04
+
+        ifelse state = 3 [
+        ;; ─── ARIGID: Iop congelado, sin procesamiento ───
+        set age-rigid age-rigid + 1
+        set last-gap-frec 0
+        set last-gap-expec 0
+        set last-dmg 0
+        ;; A_load pasivo en Arigid (λ_daño gobierna la degeneración)
+        set A_load A_load + lambda-dano * 0.15
+        ;; M_E se drena lentamente incluso en Arigid
+        set M_E max (list 0 (M_E - lambda-dano * 0.3))
+        ;; Acoplamiento: lim_{M_E→0} M_Omega = 1
+        if M_E < 5 and M_Omega > 1 [set M_Omega M_Omega - 0.01]
+        if M_Omega < 1 [set M_Omega 1]
+        ][
+        ifelse state = 2 [
+        ;; ─── AISLADO: cuenta regresiva, sin procesar nuevas irritaciones ───
+        ;;   §fix: isolation is damage-prevention, NOT damage-healing.
+        ;;   A_load stays frozen (no new damage, no active healing),
+        ;;   M_E stays frozen (no energy drain, no free recharge).
+        ;;   Recovery only happens via social reconnection (FASE 4).
+        set iso-ticks iso-ticks - 1
+        if iso-ticks <= 0 [set state 1 set cid-ticks 0]
+        set last-gap-frec 0
+        set last-gap-expec 0
+        set last-dmg 0
+        ;; A_load: frozen, not healed (isolation prevents new damage only)
+        ;; M_E: costo de mantenimiento basal (λ_daño × 0.15 ≈ 0.045)
+        set M_E max (list 0 (M_E - lambda-dano * 0.15))
+        ][
+        ifelse state = 4 [
+        ;; ─── Cid: Crisis de Identidad — Spsych fragmentado (§10 Paso 3) ───
+        ;;   M_Omega oscila violentamente; σ_pref se desestabiliza.
+        ;;   El sistema aun no esta en Arigid pero Iop es erratico.
+        set cid-ticks cid-ticks + 1
+        ;; M_Omega fluctua con amplitud proporcional a gap_expectativas
+        let cid-amp 0.05 + last-gap-expec * 0.03
+        set M_Omega max (list M_Omega_floor (M_Omega + random-normal 0 cid-amp))
+        if M_Omega > 12 [set M_Omega 12]
+        ;; σ_pref se desestabiliza: la identidad oscila
+        set sigma-pref-per max (list 0.1 (sigma-pref-per + random-normal 0 0.03))
+        set sigma-pref-comp max (list 0.1 (sigma-pref-comp + random-normal 0 0.02))
+        ;; M_E se drena por el trabajo de Iop intentando resolver la contradiccion
+        set M_E max (list 0 (M_E - lambda-dano * 1.0))
+        ;; Si Cid persiste demasiado → isolated; si se resuelve → tight
+        if cid-ticks > 15 [set state 2 set iso-ticks 5 set prev-state 4]
+        if last-gap-expec < 0.3 and cid-ticks > 5 [set state 1 set cid-ticks 0 set prev-state 4]
+        set last-gap-frec 0
+        set last-dmg 0
+        ][
+        ;; ─── ACTIVO (fluid o tight): Iop procesa irritaciones ───
+
+        ;; gap_frecuencia: rebasamiento de ancho de banda
+        let gap-frec dEs-eff + extra-stress - max (list (dep-eff + dEp_prestado) 0.12)
+        ;; Legitimacy cascade: si está activa, amplifica el gap
+        if legitimacy-cascade [
+            set gap-frec gap-frec + 0.5
+            set extra-stress extra-stress + 0.2
+        ]
+
+        ;; gap_expectativas: violacion de expectativas profundas
+        ;;   Modulado por meta-anclaje (§6.5): si A_f_meta es alto,
+        ;;   los conflictos entre anclajes producen menos gap.
+        let gap-expec 0
+        if P_vital < 0.6 [
+            set gap-expec sigma-pref-per * (1 - P_vital) * (1 - meta-anchor-strength * 0.5) * (1 + defeat-count * 0.05)
+        ]
+        ;; ─── σ modulado por identidad grupal (§5.3) ───
+        ;;   La pertenencia a grupos cohesionados absorbe parte del impacto.
+        ;;   A mayor cohesión identitaria, menor gap-expec efectivo.
+        if not empty? identity-cohesion [
+            let group-buffer mean identity-cohesion
+            set gap-expec gap-expec * (1 - group-buffer * 0.25)
+        ]
+
+        ;; ─── Iop: Navegar → evaluar estrategias disponibles ───
+        ;;   El agente explora tantas estrategias como M_Omega_perceived le permite.
+        ;;   Cada estrategia tiene un perfil de costo/beneficio distinto.
+        ;;   Seleccionar elige la que minimiza el costo esperado segun σ_pref.
+
+        ;; §4.2: sigma_social declina con la edad (positivity effect).
+        ;;   Jovenes (<100): sensibilidad social maxima.
+        ;;   Adultos (100-300): declinacion gradual.
+        ;;   Mayores (>300): minima sensibilidad a canales sociales negativos.
+        let defeat-mul 1 + defeat-count * 0.04
+        let age-sigma-mod ifelse-value (age < 100) [1.0] [
+            ifelse-value (age < 300) [max (list 0.5 (1 - (age - 100) * 0.002))] [0.4]
+        ]
+        let sigma-active (ifelse-value hostile?
+            [sigma-pred-sh * defeat-mul]
+            [sigma-pred-sr * (1 + defeat-count * 0.02)]) * age-sigma-mod
+
+        ;; Estrategia 0: CONFRONTAR — gastar M_E para procesar la irritacion activamente
+        let s0-cost M_E * 0.04 + abs (gap-frec) * sigma-active * 0.06
+        let s0-benefit 0
+        if gap-frec > 0 [set s0-benefit gap-frec * 0.4]  ;; procesar reduce el gap futuro
+        let s0-net s0-benefit - s0-cost
+
+        ;; Estrategia 1: RETIRARSE — minimizar exposicion, bajo costo, beneficio moderado
+        let s1-cost M_E * 0.01
+        let s1-benefit abs (gap-frec) * 0.25
+        let s1-net s1-benefit - s1-cost
+
+        ;; Estrategia 2: BUSCAR-APOYO — usar dEp_prestado, costo moderado
+        let s2-cost M_E * 0.025
+        let s2-benefit dEp_prestado * 0.5 + abs (gap-frec) * 0.3
+        let s2-net s2-benefit - s2-cost
+
+        ;; Estrategia 3: RUMIAR — alto costo, sin beneficio (ciclo Cid)
+        let s3-cost M_E * 0.05
+        let s3-benefit 0
+        let s3-net s3-benefit - s3-cost
+
+        ;; ─── Iop: Seleccionar — elegir la mejor estrategia accesible ───
+        ;;   El numero de estrategias evaluables = min(4, M_Omega_perceived)
+        let num-strategies min (list 4 floor M_Omega_perceived)
+        if num-strategies < 1 [set num-strategies 1]
+
+        let strategies (list s0-net s1-net s2-net)
+        if num-strategies >= 4 [set strategies lput s3-net strategies]
+        if num-strategies < 3 [set strategies sublist strategies 0 num-strategies]
+
+        let best-strategy 0
+        let best-net first strategies
+        let i 0
+        foreach strategies [s ->
+            if s > best-net [set best-net s set best-strategy i]
+            set i i + 1
+        ]
+
+        ;; El daño efectivo depende de la estrategia elegida
+        let dmg 0
+        ifelse best-net >= 0 [
+            ;; Estrategia efectiva: el agente maneja la irritacion
+            set dmg max (list 0 gap-frec) * sigma-active * 0.3
+            ;; El beneficio neto reduce el daño
+            set dmg max (list 0 (dmg - best-net))
+        ][
+            ;; Todas las estrategias son negativas: daño maximo
+            set dmg max (list 0 gap-frec) * sigma-active * (0.5 + random-float 0.85)
+        ]
+        ;; gap_expectativas siempre duele (no hay estrategia que lo evade)
+        let dmg-expec gap-expec * sigma-pref-per * 0.7
+        set dmg dmg + dmg-expec
+
+        ;; Si el agente eligio RETIRARSE (estrategia 1) y el gap es alto → aislamiento voluntario
+        if best-strategy = 1 and gap-frec > 0.9 and M_E > M_E_max * 0.3 [
+            set prev-state state set state 2 set iso-ticks 5
+        ]
+        set last-gap-frec gap-frec
+        set last-gap-expec gap-expec
+        set last-dmg dmg
+
+        ;; ─── Consumir M_E ───
+        ;;   λ_daño: eficiencia conversión daño→pérdida M_E.
+        ;;   M_Omega amortigua: a mayor diversidad topológica, menor daño neto.
+        let me-shield 1 / (1 + M_Omega * lambda-acople * 10)
+        set M_E max (list 0 (M_E - dmg * lambda-dano * 2.0 * me-shield))
+
+        ;; ─── Acumular A_load ───
+        ;;   λ_aprend: la misma tasa que gobierna σ-aprendizaje controla
+        ;;   cuán rápido se acumula A_load (integral del gap × sensibilidad).
+        if gap-frec > 0 [set A_load A_load + gap-frec * sigma-active * lambda-aprend]
+        if gap-expec > 0 [set A_load A_load + gap-expec * sigma-pref-per * lambda-aprend * 3.0]
+        ;; Drenaje de M_E proporcional a A_load acumulada
+        set M_E max (list 0 (M_E - A_load * lambda-dano * 0.006))
+
+        ;; ─── Compresión del techo de recuperación (§10 Paso 4b) ───
+        ;;   "A_load elevado reduce el Mpsy_max efectivo."
+        ;;   El piso de compresión depende de M_Omega_floor (§6.1):
+        ;;   G_vuln (floor=1) → puede caer a 3%. No-G_vuln (floor=2-4) → 7-13%.
+        ;;   Sin slider — emerge de la arquitectura genética del agente.
+        let recovery-floor max (list 0.03 (M_Omega_floor / 15 * 0.50))
+        let compression max (list recovery-floor (1 - A_load / max (list 1 alpha-crit-personal) * 0.5))
+        set M_E_max M_E_max_original * compression
+        if M_E > M_E_max [set M_E M_E_max]
+
+        ;; ─── Expectativas: actualizar desde experiencia personal Y sociales ───
+        set expect-validated 0
+        if gap-frec < 0.5 [set expect-validated expect-validated + 1]
+        if not hostile? or sigma-pred-sh < 0.5 [set expect-validated expect-validated + 1]
+        if M_E > M_E_max * 0.5 and state != 3 [set expect-validated expect-validated + 1]
+
+        ;; Influencia de Ω_sem: las expectativas sociales "tiran" de las individuales
+        ;;   Agentes con lazos mas fuertes son mas influenciados (ponderado por peso)
+        let sem-influence sum [weight] of my-links / max (list 1 current-N)
+        set expect-effort max (list 0.05 (expect-effort * (1 - sem-influence) + social-exp-effort * sem-influence))
+        set expect-fair max (list 0.05 (expect-fair * (1 - sem-influence) + social-exp-fair * sem-influence))
+        set expect-future max (list 0.05 (expect-future * (1 - sem-influence) + social-exp-future * sem-influence))
+
+        ;; σ-Aprendizaje sobre expectativas SEGUN TIPO (cognitiva vs normativa)
+        if gap-expec > 0 [
+            ifelse expect-type = "cognitive" [
+            ;; Cognitiva: aprende de la decepcion
+            set expect-future max (list 0.1 (expect-future - 0.005))
+            set expect-effort max (list 0.1 (expect-effort - 0.003))
+            ][
+            ;; Normativa: resiste la decepcion — la expectativa sobrevive a la violacion
+            ;;   Pero resistir tiene costo: gasta M_E sin reducir gap-expec
+            set M_E max (list 0 (M_E - 0.05))
+            ]
+        ]
+        ;; Recuperacion: cuando no hay gap_expec, las expectativas se restauran lentamente
+        if gap-expec = 0 and M_E > M_E_max * 0.6 [
+            set expect-future min (list 1 (expect-future + 0.001))
+        ]
+
+        ;; ─── Affordance: filtro perceptual de M_Omega ───
+        ;;   σ_pref modula cuantos estados "ve" el agente como accesibles.
+        ;;   Un agente con σ_pref_per bajo ve MENOS opciones de las que realmente tiene.
+        let affordance-filter sigma-pref-per * sigma-pref-comp
+        set M_Omega_perceived max (list M_Omega_floor (M_Omega * affordance-filter))
+
+        ;; ─── Pred: alostasis predictiva (tendencia de gap) ───
+        ;;   Si el gap esta subiendo, el agente puede aislarse ANTES del colapso.
+        set gap-history lput gap-frec gap-history
+        if length gap-history > 5 [set gap-history but-first gap-history]
+        ;; Detectar tendencia creciente en los ultimos 5 ticks
+        if length gap-history = 5 and M_E > M_E_max * 0.4 [
+            let trend item 4 gap-history - item 0 gap-history
+            ;; Si la tendencia es fuertemente creciente y el agente tiene recursos → Aislamiento Predictivo
+            if trend > 1.0 and gap-frec > 0.8 [
+            set prev-state state
+            set state 2
+            set iso-ticks 6
+            set M-int 2
+            ]
+        ]
+
+        ;; ─── T_critica: el estres temprano eleva permanentemente sigma-epi-base ───
+        if T_critica? and gap-frec > 0 [
+            set early-stress early-stress + gap-frec * sigma-active * lambda-aprend * 5.0
+            ;; El piso de sigma-pred-sh sube con la adversidad temprana
+            set sigma-epi-base max (list sigma-epi-base (0.04 + early-stress * lambda-aprend * 2.5))
+            if sigma-epi-base > 1.5 [set sigma-epi-base 1.5]
+        ]
+
+        ;; ─── Balance relacional: costo/beneficio social por lazos (Ω_red) ───
+        ;;   Cada link produce beneficios (co-regulacion, dEp_prestado, validacion)
+        ;;   y costos (mantenimiento, asimetria, ritual). El neto determina si
+        ;;   el peso del link sube, baja, o se mantiene (FASE 3b).
+        ;;   (§3 TIRME — Costo social diferencial, §6.3b — Drama social)
+        let sum-co-reg 0
+        let sum-group-id 0
+        let sum-history-benefit 0
+        let sum-base-cost 0
+        let sum-asym-penalty 0
+        let sum-ritual-cost 0
+        ask my-links [
+            let other-end-link ifelse-value (end1 = myself) [end2] [end1]
+            ;; Beneficios
+            let co-reg ifelse-value ([state] of other-end-link = 0) [weight * 0.03] [0]
+            let group-b ifelse-value shares-inst? myself other-end-link
+            [weight * 0.05] [weight * 0.01]
+            let id-val 1 - abs ([expect-effort] of other-end-link - [expect-effort] of myself)
+            set id-val id-val * weight * 0.02
+            let hist-ben (history / 100) * weight * 0.01
+            set sum-co-reg sum-co-reg + co-reg
+            set sum-group-id sum-group-id + group-b
+            set sum-history-benefit sum-history-benefit + hist-ben + id-val
+            ;; Costos
+            let g-other abs ([last-gap-frec] of other-end-link)
+            let g-self abs ([last-gap-frec] of myself)
+            set sum-base-cost sum-base-cost + weight * (1 - [sigma-pred-social] of myself + [sigma-pref-per] of myself * 0.5) * 0.02
+            set sum-asym-penalty sum-asym-penalty + ifelse-value (g-other > g-self * 1.5) [weight * 0.015] [0]
+            set sum-ritual-cost sum-ritual-cost + ifelse-value (history < 10) [weight * 0.01 * (1 - history / 10)] [0]
+        ]
+        let social-mod ifelse-value (a-cog-type = 2) [1.8] [
+            ifelse-value (a-cog-type = 1) [0.7] [1.0]
+        ]
+        let total-social-benefit sum-co-reg + sum-group-id + sum-history-benefit
+        let total-social-cost (sum-base-cost + sum-asym-penalty + sum-ritual-cost) * social-mod
+        let net-social total-social-benefit - total-social-cost
+        ;; El neto social reduce o aumenta el gap_frec efectivo del agente
+        ;;   Una red positiva (net-social > 0) amortigua el gap
+        ;;   Una red negativa (net-social < 0) lo amplifica
+        let gap-frec-original gap-frec
+        set gap-frec gap-frec - net-social * 0.1
+        ;; El neto también modula A_load directamente
+        if net-social < -0.05 [
+            set A_load A_load + abs (net-social) * 0.02
+        ]
+        if net-social > 0.05 [
+            set A_load max (list 0 (A_load - net-social * 0.01))
+        ]
+
+        ;; ─── Metabolismo productivo acoplado a la red social (Meso) ───
+        ;;   Termodinámica de la producción, aloparentalidad y acumulación.
+        ;;   FLUID produce a tasa completa. TIGHT produce al 50%: está operando
+        ;;   bajo carga (gap > 0.18) y su metabolismo es menos eficiente.
+        if state = 0 or state = 1 [
+            ;; 1. Producción dependiente del entorno (restricción ecológica)
+            ;;    λ_prod: productividad basal. Con default 0.50 → igual que antes.
+            let age-prod-factor ifelse-value (age < 100) [age / (200 / 6 * ticks-per-year)] [
+              ifelse-value (age < 450) [1.0] [max (list 0.1 (1 - (age - 450) / 100))]
+            ]
+
+            set edu-prod-factor ifelse-value (edu-level = 2) [1.4] [ifelse-value (edu-level = 1) [1.2] [1.0]]
+            let potential-prod dEp * age-prod-factor * edu-prod-factor * lambda-prod
+            let local-resources [patch-resources] of patch-here
+            let actual-prod min (list potential-prod local-resources)
+            ask patch-here [set patch-resources max (list 0 (patch-resources - actual-prod))]
+            ;; 2. Costo de cuidado de dependientes
+            let care-drain 0
+            let my-dependents turtles with [parent-id = [who] of myself and age < 100]
+            if any? my-dependents [
+                set care-drain count my-dependents * 0.3
+            ]
+            ;; 3. Red Aloparental: déficit cubierto por lazos fuertes
+            ;;    Costo basal = λ_prod × 0.4. Tight: eficiencia ∝ 1 − gap/dEp.
+            let net-prod (actual-prod - cost-of-living) * F-op-econ
+            ;; Tight: gap > 0.18 reduce eficiencia metabólica. A mayor gap, menor producción.
+            if state = 1 [set net-prod net-prod * max (list 0.05 (1 - last-gap-frec / max (list 1 (dEp * 2.5))))]
+            if net-prod < care-drain [
+                let deficit care-drain - net-prod
+                let helpers my-links with [weight > 0.4]
+                if any? helpers [
+                    let total-help 0
+                    let remaining-deficit deficit
+                    ask helpers [
+                        ;; Cada link contribuye según su peso
+                        if (end1 != nobody and end2 != nobody) [
+                            ;; Determinar cuál extremo NO es la turtle original
+                            let helper-node ifelse-value (end1 = myself) [end2] [end1]
+                            if is-turtle? helper-node and helper-node != nobody [
+                                let me-helper [M_E] of helper-node
+                                if me-helper > [M_E_max] of helper-node * 0.4 [
+                                    let contribution min (list remaining-deficit (me-helper * 0.1))
+                                    ask helper-node [set M_E max (list 0 (M_E - contribution))]
+                                    set total-help total-help + contribution
+                                    set remaining-deficit max (list 0 (remaining-deficit - contribution))
+                                ]
+                            ]
+                        ]
+                    ]
+                    set deficit max (list 0 (deficit - total-help))
+                set care-drain max (list 0 (care-drain - (care-drain - deficit)))
+            ]
+            ;; 4. Balance final y transferencia a hijos
+            set M_E M_E + net-prod - care-drain
+            if any? my-dependents [
+                ask my-dependents [set M_E min (list M_E_max (M_E + 0.1))]
+            ]
+
+            ;; ─── Extracción autoritaria (§H5) ───
+            ;;   Se activa durante la CAPTURA (meta < 0.30), no post-colapso.
+            ;;   Tasa proporcional a la distancia al umbral.
+            if meta-anchor-strength < 0.30 [
+                let my-leadership (M_E / max (list 1 M_E_max)) * 0.3 + (dEp / 8) * 0.25 + (M_Omega / 10) * 0.2
+                if my-leadership > 0.5 and count my-links > 5 [
+                    let followers my-links with [weight > 0.3]
+                    if any? followers [
+                        let extracted 0
+                        let extr-rate (0.30 - meta-anchor-strength) / 0.30  ;; 0→1
+                        ask followers [
+                            let other-end-link ifelse-value (end1 = myself) [end2] [end1]
+                            if [M_E] of other-end-link > [M_E_max] of other-end-link * 0.15 [
+                                let take min (list 2 ([M_E] of other-end-link * 0.05 * extr-rate))
+                                ask other-end-link [set M_E max (list 0 (M_E - take))]
+                                set extracted extracted + take
+                            ]
+                        ]
+                        set M_E min (list M_E_max (M_E + extracted))
+                    ]
+                ]
+            ]
+            ;; 5. Capitalización del excedente
+            if M_E > M_E_max [
+                set wealth wealth + (M_E - M_E_max)
+                set M_E M_E_max
+            ]
+            set M_E max (list 0 M_E)
+        ]
+
+        ;; ─── σ-Aprendizaje (§6.12): actualizar σ_pred ───
+        ;;     Solo opera si M_E > 0 (en Arigid, α ≈ 0)
+        ;;     λ_aprend: tasa de adaptación. Asimetría: amenaza se aprende más rápido.
+        if M_E > 5 [
+            ;; Aprendizaje asimetrico: reducir σ_pred cuando el resultado es mejor de lo esperado
+            if gap-frec < 0 [
+            set sigma-pred-sh max (list sigma-epi-base (sigma-pred-sh - lambda-aprend * 0.05))
+            set sigma-pred-sr max (list 0.02 (sigma-pred-sr - lambda-aprend * 0.02))
+            ]
+            ;; Aumentar σ_pred cuando el resultado es peor (aprendizaje de amenaza mas rapido)
+            if gap-frec > 1.5 [
+            set sigma-pred-sh min (list 3 (sigma-pred-sh + lambda-aprend * 0.2))
+            ]
+        ]
+
+        ;; ─── Dev(t): volatilidad de M_Omega en la ventana adolescente (ticks 100-200) ───
+        if age > 100 and age < 200 and M_Omega > M_Omega_floor [
+            ;; Mayor volatilidad en la ventana ~17-27 anos (Teorema 6.9)
+            let vol-amp 0.02 + a-cog-type * 0.01   ;; a-cog-type 2 (social-volatil) es mas volatil
+            set M_Omega max (list M_Omega_floor (M_Omega + random-normal 0 vol-amp))
+        ]
+
+        ;; ─── TRANSICIONES DE ESTADO ───
+        ifelse M_E <= 0 [
+            ;; Colapso energético
+            ifelse G_vuln? and M_Omega <= 1 [
+            ;; G_vuln + sin diversidad → Arigid (Lmeta)
+            set prev-state state set state 3
+            set age-rigid 0 set defeat-count defeat-count + 1
+            set M-int 4    ;; inmovilización
+            ][
+            ;; Sin G_vuln o con M_Omega_floor > 1 → Aislamiento Episódico Profundo
+            set prev-state state set state 2
+            set iso-ticks 8 + random 12
+            set defeat-count defeat-count + 1
+            set M_E mInit * 0.05      ;; rescue floor proporcional a recursos iniciales
+            ]
+        ][
+            ;; Umbral de aislamiento
+            ifelse gap-frec >= thr-eff or gap-expec > 1.5 [
+            set prev-state state set state 2
+            set iso-ticks 3 + random 6
+            set defeat-count defeat-count + 1
+            set M-int 2
+            ][
+            ;; Oscilacion de doble vinculo: gap-expec persistente produce
+            ;;   oscilacion computacional en Iop (§Prefacio: logica predictiva).
+            ;;   Si persiste demasiado, fuerza Cid.
+            if gap-expec > 0.5 and last-gap-expec > 0.5 [
+                set cid-oscillation cid-oscillation + 1
+            ]
+            if gap-expec < 0.3 or last-gap-expec < 0.3 [
+                set cid-oscillation max (list 0 (cid-oscillation - 1))
+            ]
+            if cid-oscillation > 8 and state = 1 and cid-ticks = 0 [
+                set prev-state state set state 4
+            ]
+            ;; Cid: gap_expectativas alto sostenido → crisis de identidad
+            if gap-expec > 0.8 and state = 1 and cid-ticks = 0 [
+                ;; Solo desde tight; en fluid el sistema aun puede compensar
+                if random-float 1 < 0.3 [   ;; 30% probabilidad por tick con gap-expec alto
+                set prev-state state set state 4
+                ]
+            ]
+            ;; Transiciones fluid ↔ tight
+            if gap-frec > 0.18 and state = 0 [
+                set prev-state state set state 1
+                set M-int 1    ;; afiliación (busca apoyo)
+            ]
+            if gap-frec <= 0.18 and state != 0 [
+                set prev-state state set state 0
+                set M-int 0    ;; exploración
+                ;; Plasticidad: mejorar dEp con tiempo sano
+                set dEp min (list (dEp + 0.004) (dEs * 1.85))
+                ;; Expandir M_Omega si M_E es alto
+                if M_E > M_E_max * 0.7 and M_Omega < 12 [
+                set M_Omega M_Omega + 0.001
+                ]
+            ]
+            ]
+        ]
+        ]]
+
+        ;; ─── Bifurcacion por A_load: α cruza α_crit (§4, §10 Paso 4c-5) ───
+        ;;   TRES CAMINOS + uno de escape para no-G_vuln bajo estrés extremo.
+        ;;
+        ;;   1. COLAPSO TOPOLÓGICO (todos los agentes)
+        ;;      A_load > α_crit → M_Ω=1, M_Ω_floor=1 irreversible.
+        ;;
+        ;;   2. RIGIDIZACIÓN POR BIFURCACIÓN (solo G_vuln)
+        ;;      "Sbio fuerza Lmeta" — bifurcación directa a rigid.
+        ;;
+        ;;   3. RIGIDIZACIÓN ESPONTÁNEA BASAL (solo G_vuln)
+        ;;      M_Ω=1 + baja energía → probabilidad basal de colapso.
+        ;;
+        ;;   4. ESCAPE DEL FLOOR M_E=5 (no-G_vuln con A_load > 2×α_crit)
+        ;;      Bajo estrés extremo, incluso los no-G_vuln pueden rigidizar.
+        ;;      El "Aislamiento Episodico Profundo" deja de ser protector.
+        if A_load > alpha-crit-personal [
+        ;; Camino 1: colapso topológico para todos
+        if M_Omega_floor > 1 [set M_Omega_floor 1]
+        set M_Omega 1
+        ;; Camino 2: G_vuln → rigid directo (bifurcación)
+        if G_vuln? and state != 3 [
+            set prev-state state set state 3
+            set age-rigid 0 set defeat-count defeat-count + 1
+            set M-int 4
+        ]
+        ]
+
+        ;; Camino 3: rigidización espontánea basal (genética pura)
+        if G_vuln? and M_Omega <= 1 and M_E < M_E_max * 0.3 [
+            if random-float 1 < 0.0008 [
+                set prev-state state set state 3
+                set age-rigid 0 set defeat-count defeat-count + 1
+                set M-int 4
+            ]
+        ]
+
+        ;; Camino 4: no-G_vuln bajo A_load > 2×α_crit pueden rigidizar
+        ;;   El M_E=5 floor deja de aplicar. El sistema está tan dañado
+        ;;   que incluso los genéticamente resilientes colapsan.
+        if not G_vuln? and A_load > alpha-crit-personal * 2 and M_E < M_E_max * 0.05 and M_Omega <= 1 [
+            set prev-state state set state 3
+            set age-rigid 0 set defeat-count defeat-count + 1
+            set M-int 4
+        ]
+
+        ;; ─── Actualizar M_Omega por acoplamiento ───
+        ;;     lim_{M_E→0} M_Omega = M_Omega_floor
+        ;;     λ_acople: sensibilidad del acoplamiento topología↔energía
+        if M_E < 10 and M_Omega > M_Omega_floor [
+        set M_Omega max (list M_Omega_floor (M_Omega - lambda-acople * (10 - M_E) / 10))
+        ]
+
+        ;; ─── Actualizar M-int según estado ───
+        if state = 0 and M-int != 0 [set M-int 0]
+        if state = 3 and M-int != 4 [set M-int 4]
+    ]]  ;; cierra else de state=3
+    ]  ;; cierra ask turtles
+
+    ;; ─── FASE 3b: DINÁMICA DE PESO DE LINKS Y TIPOS DE RELACIÓN (Ω_red ponderada) ───
+    ;;   Cada link tiene un balance neto que determina su peso:
+    ;;   - Ambos ganan → weight sube (relación positiva)
+    ;;   - Ambos pierden → weight baja (desgaste mutuo)
+    ;;   - Uno gana y otro pierde → estancamiento con desgaste lento (poder)
+    ;;   El tipo de enlace emerge de condiciones estructurales (§3 TIRME).
+    ask links [
+        let a end1 let b end2
+        let state-a [state] of a let state-b [state] of b
+        let gap-a abs ([last-gap-frec] of a)
+        let gap-b abs ([last-gap-frec] of b)
+        let gap-expec-a [last-gap-expec] of a
+        let gap-expec-b [last-gap-expec] of b
+        let me-a [M_E] of a / max (list 1 [M_E_max] of a)
+        let me-b [M_E] of b / max (list 1 [M_E_max] of b)
+        let same-inst [institution-link-id] of self > 0 and shares-inst? a b
+        let same-group shares-group? a b
+
+        ;; ─── Emergencia de anclajes: líderes como anclas de expectativas ───
+        ;;   §2.1 — un nodo con alta centralidad, recursos, y resiliencia se convierte
+        ;;   en anclaje natural para las expectativas de sus vecinos.
+        ;;   El score de liderazgo combina: energía, capacidad de procesamiento,
+        ;;   flexibilidad cognitiva, y autonomía.
+        let max-dEp 8
+        let leadership-a (
+        ([M_E] of a / max (list 1 [M_E_max] of a)) * 0.3 +
+        ([dEp] of a / max-dEp) * 0.25 +
+        ([M_Omega] of a / 10) * 0.2 +
+        [sigma-pref-comp] of a * 0.15 +
+        (1 - [sigma-pref-per] of a) * 0.1
+        )
+        let leadership-b (
+        ([M_E] of b / max (list 1 [M_E_max] of b)) * 0.3 +
+        ([dEp] of b / max-dEp) * 0.25 +
+        ([M_Omega] of b / 10) * 0.2 +
+        [sigma-pref-comp] of b * 0.15 +
+        (1 - [sigma-pref-per] of b) * 0.1
+        )
+        ;; Si un extremo tiene liderazgo significativamente mayor y el lazo es fuerte
+        ;;   §H5: restricción etaria — menores de 18 solo lideran pares.
+        let leader-ok-a (leadership-a > 0.6 and leadership-a > leadership-b + 0.2)
+        if leader-ok-a [
+            ;; Si A es menor de 18, B también debe serlo
+            if [age] of a < 108 and [age] of b >= 108 [set leader-ok-a false]
+        ]
+        if weight > 0.4 and leader-ok-a [
+        ;; A puede anclar expectativas en B
+        let exp-id-to-anchor 2  ;; expect-future es la más comúnmente anclada por líderes
+        ;; Verificar si B ya tiene este anclaje
+        let already-anchored false
+        foreach [anchored-expect] of b [pair ->
+            if item 0 pair = exp-id-to-anchor and item 2 pair = [who] of a [
+            set already-anchored true
+            ]
+        ]
+        if not already-anchored [
+            ;; Crear el anclaje con fuerza inicial
+            let new-anchor (list exp-id-to-anchor "person" [who] of a leadership-a 0.5)
+            ask b [
+            set anchored-expect lput new-anchor anchored-expect
+            set expect-type "normative"
+            ]
+        ]
+        ]
+        ;; Simétricamente, B puede anclar en A
+        let leader-ok-b (leadership-b > 0.6 and leadership-b > leadership-a + 0.2)
+        if leader-ok-b [
+            if [age] of b < 108 and [age] of a >= 108 [set leader-ok-b false]
+        ]
+        if weight > 0.4 and leader-ok-b [
+        let exp-id-to-anchor 2
+        let already-anchored false
+        foreach [anchored-expect] of a [pair ->
+            if item 0 pair = exp-id-to-anchor and item 2 pair = [who] of b [
+            set already-anchored true
+            ]
+        ]
+        if not already-anchored [
+            let new-anchor (list exp-id-to-anchor "person" [who] of b leadership-b 0.5)
+            ask a [
+            set anchored-expect lput new-anchor anchored-expect
+            set expect-type "normative"
+            ]
+        ]
+        ]
+
+        ;; ─── Clasificar tipo de enlace ───
+        ;;   Parentesco = alto peso + mismo grupo (piso estructural)
+        if weight >= 0.7 and same-group [set link-type 1]
+        ;;   Amistad = peso medio, sin parentesco ni institucion
+        if weight >= 0.4 and weight < 0.8 and not same-group and not same-inst [set link-type 2]
+        ;;   Poder/institucional = misma institución o asimetría de beneficio
+        if same-inst [set link-type 3]
+        if weight >= 0.2 and weight < 0.6 and (gap-a * 2 < gap-b or gap-b * 2 < gap-a) [set link-type 3]
+        ;;   Público = peso muy bajo
+        if weight < 0.15 [set link-type 4]
+        ;;   Proto que sobrevive → amistad por defecto
+        if link-type = 0 and weight >= 0.2 [set link-type 2]
+
+        ;; ─── Burocracia (link-type=5): autoridad formal unidireccional (§3 TIRME) ───
+        ;;   Emerge cuando: institution-id compartido, high leadership a un extremo,
+        ;;   baja liderazgo en el otro. El lazo es unidireccional (decisión →, reporte ←).
+        ;;   El peso es fijo en 1.0 mientras la institución exista.
+        ;;   El balance net-social NO afecta el peso (el rol sobrevive a la persona).
+        let both-have-inst has-inst? a and has-inst? b
+        let leadership-gap abs (leadership-a - leadership-b)
+        if both-have-inst and leadership-gap > 0.3 and weight > 0.5 [
+        set link-type 5
+        set weight 1.0  ;; peso fijo — la ruputura es institucional, no interpersonal
+        ]
+        ;; Enlace de autoridad: la burocracia no responde al balance net-social
+        if link-type = 5 [
+        set history min (list 100 (history + 1))  ;; se fortalece con el tiempo
+        ]
+
+        ;; ─── Beneficios del link para AMBOS extremos ───
+        ;;   Co-regulación: si al menos uno está fluid, hay beneficio
+        let co-reg-b ifelse-value (state-a = 0 or state-b = 0) [weight * 0.03] [0]
+        ;;   Validación identitaria: expectativas similares reducen gap
+        let id-val (1 - abs ([expect-effort] of a - [expect-effort] of b)) * weight * 0.02
+        ;;   Historia: los lazos duraderos valen más (sunk cost)
+        let hist-b (history / 100) * weight * 0.02
+        ;;   Pertenencia institucional: misma institución duplica el beneficio
+        let inst-b ifelse-value same-inst [weight * 0.04] [0]
+        let total-benefit weight * 0.01 + co-reg-b + id-val + hist-b + inst-b
+
+        ;; ─── Costos del link ───
+        ;;   Base: mantener el lazo cuesta según peso y perfil social de cada uno
+        ;; Selectividad socioemocional (Carstensen): >40 paga mas por lazos debiles
+        let age-sel-a ifelse-value ([age] of a > age-select-start) [1.5] [1.0]
+        let age-sel-b ifelse-value ([age] of b > age-select-start) [1.5] [1.0]
+        let cost-a weight * (1 - [sigma-pred-social] of a * 0.5 + [sigma-pref-per] of a * 0.3) * 0.02 * age-sel-a
+        let cost-b weight * (1 - [sigma-pred-social] of b * 0.5 + [sigma-pref-per] of b * 0.3) * 0.02 * age-sel-b
+        ;;   Asimetría: el que está peor paga más (fricción asimétrica)
+        let asym-a ifelse-value (gap-a > gap-b * 1.5) [weight * 0.015] [0]
+        let asym-b ifelse-value (gap-b > gap-a * 1.5) [weight * 0.015] [0]
+        ;;   Ritual: lazos jóvenes requieren más inversión
+        let ritual-a ifelse-value (history < 10) [weight * 0.01 * (1 - history / 10)] [0]
+        let ritual-b ifelse-value (history < 10) [weight * 0.01 * (1 - history / 10)] [0]
+        let total-cost (cost-a + cost-b + asym-a + asym-b + ritual-a + ritual-b) / 2
+
+        ;; ─── Neto y evolución del peso ───
+        ;;   Los enlaces de autoridad (link-type=5) no responden al balance:
+        ;;   su peso es fijo, el rol mantiene el lazo independientemente del net-social.
+        if link-type = 5 [stop]
+        let net-a total-benefit - cost-a - asym-a - ritual-a
+        let net-b total-benefit - cost-b - asym-b - ritual-b
+
+        ;; Ambos ganan → weight sube
+        if net-a > 0 and net-b > 0 [
+        set weight min (list 1 (weight + 0.005 * (net-a + net-b)))
+        set history min (list 100 (history + 1))
+        ]
+        ;; Ambos pierden → weight baja (desgaste mutuo)
+        if net-a < 0 and net-b < 0 [
+        let erosion 0.01 * abs (net-a + net-b)
+        ;; La historia ralentiza la caída (inercia relacional)
+        if history > 20 [set erosion erosion * 0.5]
+        set weight max (list 0 (weight - erosion))
+        ]
+        ;; Asimetría: uno gana, otro pierde
+        if (net-a > 0 and net-b < 0) or (net-b > 0 and net-a < 0) [
+        let loser-who ifelse-value (net-a < 0) [a] [b]
+        let has-alt [count link-neighbors] of loser-who > 1
+        ifelse has-alt [
+            ;; Puede irse → el lazo se debilita rápido
+            set weight max (list 0 (weight - 0.015))
+        ][
+            ;; No tiene alternativa → soporta aunque pierda (A_load sube)
+            set weight max (list 0.15 (weight - 0.003))
+            ask loser-who [set A_load A_load + 0.05]
+        ]
+        ]
+
+        ;; ─── Drama social: violación de expectativas ───
+        if gap-expec-a > 2.0 or gap-expec-b > 2.0 [
+        ;; Violación masiva → caída abrupta
+        set weight max (list 0 (weight - 0.3))
+        set history max (list 0 (history - 20))
+        ]
+        ;; Cismogénesis: ambos con gap subiendo (polarización)
+        if length [gap-history] of a >= 1 and length [gap-history] of b >= 1 [
+        let trend-a gap-a - item 0 [gap-history] of a
+        let trend-b gap-b - item 0 [gap-history] of b
+        if trend-a > 0 and trend-b > 0 and length [gap-history] of a >= 5 [
+        ;; Polarización: intentar resolver tension la incrementa
+        set weight max (list 0 (weight - 0.02))
+        ask a [set extra-stress extra-stress + 0.15]
+        ask b [set extra-stress extra-stress + 0.15]
+        ]
+        ]
+
+        if link-type = 1 [
+        ;; parentesco: resistente pero modulado por valores culturales (WVS, u00a723.3)
+        ;;   Sin piso duro: puede romperse si los valores sociales lo permiten
+        let divorce-rate 0.012  ;; base: ~14 años de vida media  ;; base: ~0.2% por tick (~33 au00f1os de vida media)
+        ;; Sociedades tradicionales (future normativo) u2192 familia mu00e1s protegida
+        if item 2 social-exp-type = "normative" [set divorce-rate divorce-rate * 0.5]
+        ;; Valores de autoexpresiu00f3n (future cognitivo + futuro incierto) u2192 mu00e1s divorcio
+        if item 2 social-exp-type = "cognitive" and social-exp-future < 0.4 [set divorce-rate divorce-rate * 2.0]
+        set weight max (list 0 (weight - divorce-rate))
+        ]
+        if link-type = 3 [  ;; poder: verificar que la asimetría persiste
+        if abs (gap-a - gap-b) < 0.3 [set link-type 2]  ;; se igualó → amistad
+        ]
+        if link-type = 4 and weight > 0.2 [
+        ;; público que se fortaleció → transición a amistad
+        set link-type 2
+        ]
+
+        ;; ─── History: contador de ticks sin gap alto ───
+        if gap-a < 1.0 and gap-b < 1.0 [
+        set history min (list 100 (history + 1))
+        ]
+        if gap-a > 1.5 or gap-b > 1.5 [
+        set history max (list 0 (history - 3))
+        ]
+
+        ;; ─── Dinamica de canales: cada subsistema funcional evoluciona independiente ───
+        ;;   §3c: los enlaces son tensores de adyacencia [w_econ, w_pol, w_der, w_afect]
+        ;;   Secon ∩ Spol = ∅ → los canales no se afectan mutuamente.
+        let w-econ item 0 channel-weights
+        let w-pol item 1 channel-weights
+        let w-der item 2 channel-weights
+        let w-afect item 3 channel-weights
+        ;; Canal afectivo: sube con co-regulacion y sincronia de estados
+        if state-a = state-b and state-a != 3 [
+        set w-afect min (list 1 (w-afect + 0.003))
+        ]
+        ;; Canal economico: sube si ambos comparten institution-id
+        if same-inst [
+        set w-econ min (list 1 (w-econ + 0.002))
+        ]
+        ;; Canal politico: sube con participacion en el meta-anclaje
+        if meta-anchor-strength > 0.3 [
+        set w-pol min (list 1 (w-pol + 0.001))
+        ]
+        ;; Canal juridico: sube con historia acumulada (confianza institucional)
+        if history > 30 [
+        set w-der min (list 1 (w-der + 0.001))
+        ]
+        ;; Asimetria severa → los canales formales se debilitan mas que el afectivo
+        if (state-a = 3) xor (state-b = 3) [
+        set w-econ max (list 0 (w-econ - 0.01))
+        set w-pol max (list 0 (w-pol - 0.01))
+        set w-der max (list 0 (w-der - 0.01))
+        ;; w_afect se mantiene (el parentesco/amistad sobrevive a la crisis)
+        ]
+        ;; Actualizar channel-weights y recalcular weight agregado
+        set channel-weights (list w-econ w-pol w-der w-afect)
+        ;; Weight agregado por tipo de enlace (§3c): cada tipo pondera distinto los canales
+        ifelse link-type = 1 [  ;; parentesco: domina lo afectivo
+        set weight (0.1 * w-econ + 0.3 * w-pol + 0.2 * w-der + 0.9 * w-afect) / 1.5
+        ][ ifelse link-type = 5 [  ;; burocratico: excluye lo afectivo
+        set weight (0.5 * w-econ + 0.4 * w-pol + 0.4 * w-der + 0.05 * w-afect) / 1.35
+        ][ ifelse link-type = 3 [  ;; poder: mezcla institucional
+        set weight (0.4 * w-econ + 0.5 * w-pol + 0.3 * w-der + 0.2 * w-afect) / 1.4
+        ][ ifelse link-type = 2 [  ;; amistad: domina lo afectivo
+        set weight (0.2 * w-econ + 0.2 * w-pol + 0.2 * w-der + 0.8 * w-afect) / 1.4
+        ][  ;; publico/proto: neutro
+        set weight (0.1 * w-econ + 0.1 * w-pol + 0.1 * w-der + 0.1 * w-afect) / 0.4
+        ]]]]
+
+        ;;
+        ;; §19 — Fricción Topológica Continua: decaimiento basal por inactividad.
+        ;;   Si AMBOS nodos están fuera de juego (aislados, rígidos, Cid),
+        ;;   el enlace se desgasta aunque no haya gap. Derivado de λ_fric.
+        if state-a != 0 and state-a != 1 and state-b != 0 and state-b != 1 [
+            set weight max (list 0 (weight - lambda-fric * 0.01))
+        ]
+        ;; §Ecología Humana: costo espacial del enlace (distancia → fricción en Ω_arq)
+        ;;   Los lazos distantes decaen más rápido → clustering local emerge sin planificación
+        let dist-ij sqrt(([xcor] of end2 - [xcor] of end1) ^ 2 + ([ycor] of end2 - [ycor] of end1) ^ 2)
+        let spatial-cost dist-ij / max-pxcor * 0.001
+        set weight max (list 0 (weight - spatial-cost))
+
+        ;; §20 — Atractores Oscuros: cuando el meta-anclaje colapsa,
+        ;;   los lazos intra-grupo se refuerzan (refugio tribal) y los
+        ;;   lazos inter-grupo mueren más rápido. Sin mecanismo nuevo —
+        ;;   solo amplifica lo que la topología ya está haciendo.
+        if meta-anchor-strength < 0.10 [
+            if shares-group? a b [
+                set weight min (list 1 (weight + 0.005))
+            ]
+            if not shares-group? a b [
+                set weight max (list 0 (weight - 0.01))
+            ]
+        ]
+
+        ;; ─── Purga autoritaria (§H5) ───
+        ;;   Se activa durante la CAPTURA (meta < 0.30), tasa proporcional.
+        if meta-anchor-strength < 0.30 [
+            if link-type != 5 [  ;; no purgar burocracia formal
+                let a-lead (([M_E] of a / max (list 1 [M_E_max] of a)) * 0.3)
+                let b-lead (([M_E] of b / max (list 1 [M_E_max] of b)) * 0.3)
+                let purge-rate (0.30 - meta-anchor-strength) / 0.30 * 0.3
+                if a-lead > 0.5 and [state] of b = 3 [set weight max (list 0 (weight - purge-rate))]
+                if b-lead > 0.5 and [state] of a = 3 [set weight max (list 0 (weight - purge-rate))]
+            ]
+        ]
+
+        ;; Si weight llega a 0, el link muere
+        ;; Grabar ruptura en break-memory
+        let who1 [who] of end1
+        let who2 [who] of end2
+        let gap-at-break (abs [last-gap-expec] of end1 + abs [last-gap-expec] of end2) / 2
+        ask end1 [set break-memory lput (list who2 ticks gap-at-break) break-memory]
+        ask end2 [set break-memory lput (list who1 ticks gap-at-break) break-memory]
+        if weight <= 0 [die]
+    ]
+
+    ;; ─── Calcular promedios poblacionales ───
+    ifelse active > 0 [
+        set avg-thr-eff sum-thr / active
+        set avg-dep-eff sum-dep / active
+    ][
+        set avg-thr-eff 1.0
+        set avg-dep-eff dEpMu
+    ]
+    set avg-M_Omega mean [M_Omega] of turtles
+    set avg-M_E mean [M_E] of turtles
+    set avg-A_load mean [A_load] of turtles
+
+    ;; ─── FASE 4: REGENERACIÓN — Tres operaciones distintas ───
+
+    ;; 4a: SINCRONIZACIÓN ENERGÉTICA (§6.3 expandido, Ω_red → ΔM_E)
+    ;;     Pares estables absorben la carga termodinámica
+    ;;     Modulado por regimen demografico (Fase 1 ABM):
+    ;;       - Silencio (0): regeneracion amplificada — hay espacio social
+    ;;       - Destructivo (2): regeneracion degradada — saturacion de canales
+    calculate-clustering
+    let reg-dem-mod ifelse-value (regime-dem = 2) [0.6] [
+        ifelse-value (regime-dem = 0) [1.3] [1.0]
+    ]
+    set reg-mul (0.6 + 0.7 * avg-clustering) * reg-dem-mod
+    ask turtles with [state = 0 or state = 1] [
+        ;; Energy transfer: sum weights of links to stable peers
+        let energy-transfer 0
+        ask my-links [
+        let other-link ifelse-value (end1 = myself) [end2] [end1]
+        if [state] of other-link = 0 and [M_E] of other-link > [M_E_max] of other-link * 0.6 [
+            set energy-transfer energy-transfer + weight
+        ]
+        ]
+        set energy-transfer energy-transfer * lambda-rec * 4.0 * reg-mul
+        set M_E min (list M_E_max (M_E + energy-transfer))
+        ;; Los N_t son especialmente efectivos como estabilizadores (ponderado por peso)
+        let nt-boost 0
+        ask my-links [
+        let other-link ifelse-value (end1 = myself) [end2] [end1]
+        if [is-therapeutic?] of other-link [set nt-boost nt-boost + weight]
+        ]
+        if nt-boost > 0 [
+        set M_E min (list M_E_max (M_E + nt-boost * lambda-rec * 3.0))
+        if M-int = 2 [set M-int 1]
+        ]
+    ]
+
+    ;; 4b: EXPANSIÓN TOPOLÓGICA REFLEXIVA (§6.13, Ω_sem → ΔM_Ω)
+    ;;     Adoptar rol de ayudante expande la diversidad de atractores
+    ask turtles with [state = 0 and not empty? role-weights and max role-weights > 0.5 and M_E > M_E_max * 0.4] [
+        ;; Ayudar consume M_E pero expande M_Omega
+        set M_E max (list 0 (M_E - 0.5))
+        set M_Omega min (list 15 (M_Omega + 0.02))
+        ;; El valor de ayudar reduce A_load
+        set A_load max (list 0 (A_load - sigma-pref-comp * 0.05))
+        ;; Abre canales de competencia
+        set sigma-pref-comp min (list 1 (sigma-pref-comp + 0.001))
+    ]
+
+    ;; 4c: SUSPENSIÓN CONTINGENTE (§16, Ω_arq → dEs/dt ↓)
+    ;;     El entorno estructurado fuerza dEs/dt ≈ 0, permitiendo recarga pasiva
+    ;;     de M_E (§16, Etapa 1b). La recarga es LENTA: solo mantiene, no acelera.
+    ;;     §17 — Entropía Infraestructural: el struct-benefit escala con la
+    ;;     fracción de agentes fluid (activos). Sin floor — si nadie mantiene
+    ;;     la infraestructura, el beneficio colapsa a 0 eventualmente.
+    let active-frac c-fluid / max (list 1 current-N)
+    let infra-decay active-frac
+    ask turtles with [state = 2] [
+        let struct-benefit 0
+        ask patch-here [
+        set struct-benefit accesibilidad * (1 + valencia)
+        ]
+        set M_E min (list M_E_max (M_E + struct-benefit * lambda-rec * (1 - hp-eff) * infra-decay))
+    ]
+
+    ;; ─── FASE 4d: DINAMICA DEMOGRAFICA (nacimiento, muerte, migracion) ───
+    ;;   Gated por dynamic-pop? para no romper simulaciones estaticas.
+    ;;   Birth/Death = eventos Ψ, no Σ. No afectan dEs-eff directamente.
+    ;;   Afectan ρ, que afecta λ → dEs-demo → dEs-eff en el PROXIMO tick (FASE 0b).
+    if dynamic-pop? [
+        ;; ─── Φ_demo: Migracion como disipacion entropica (Hawley + Chase-Dunn) ───
+        ask turtles with [(state = 0 or state = 1) and rho > kappa-meso * 0.9] [
+        ifelse circumscription? [
+            ;; Circunscripcion (Chase-Dunn): la presion no puede disiparse → se acumula
+            set extra-stress extra-stress + (rho / max (list 1 kappa-meso) - 1) * 0.5
+        ][
+            ;; Hawley: migracion como disipacion — buscar parches con baja densidad
+            ;; Excluir el propio patch para no auto-seleccionarse
+            let candidates patches with [count turtles-here < 3 and accesibilidad > 0.3]
+            if any? candidates [
+            let target-patch max-one-of candidates [accesibilidad - count turtles-here * 0.2]
+            if target-patch != patch-here [
+                move-to target-patch
+                set M_E max (list 0 (M_E - 1))  ;; costo neto de la migracion (disipacion incluida)
+            ]
+            ]
+        ]
+        ]
+
+        ;; ─── Death: muerte por Arigid prolongado, agotamiento irreversible, o vejez ───
+        ask turtles with [
+          (state = 3 and age-rigid > 200 and random-float 1 < death-rate * 2) or
+          (M_E <= 0 and A_load > 50 and random-float 1 < death-rate * 3) or
+          (age > age-death-max and random-float 1 < 0.05)  ;; vejez (~85 años, muerte natural)
+        ] [
+          let dead-who who
+          die
+          ;; Si el muerto era partner de alguien, liberarlo
+          ask turtles with [partner-id = dead-who] [set partner-id 0]
+        ]
+
+        ;; ─── Birth: fertilidad multivariante (§5) ───
+        ;;   §18 — Bifurcación r/K: cuando P_vital colapsa, la estrategia
+        ;;   reproductiva conmuta de K (alta inversión, pocos hijos) a r
+        ;;   (baja inversión, más hijos, mayor mortalidad infantil).
+
+        ;; Estrategia K (default): alta energía, alta previsibilidad
+        ask turtles with [state = 0 and age >= (age-adult-min - 20) and age < age-fertile-max and M_E > M_E_max * 0.3 and rho < kappa-meso * 0.95] [
+          let candidates link-neighbors with [
+            state = 0 and age >= (age-adult-min - 20) and age < age-fertile-max and M_E > M_E_max * 0.2
+            and abs (age - [age] of myself) < 50
+          ]
+          if any? candidates [
+            let partner one-of candidates
+            let avg-age (age + [age] of partner) / 2
+            ;; Vector 1: Biológico — campana gaussiana con pico modulado por riesgo
+            let risk-shift hp-eff * 60
+            let fertile-peak max (list 150 (250 - risk-shift))
+            let f-age abs (avg-age - fertile-peak) / 100
+            let bio-factor ifelse-value (f-age > 2.5) [0] [exp (- f-age * f-age)]
+            ;; Vector 2: Energético — ¿hay recursos para invertir?
+            let me-a M_E / max (list 1 M_E_max)
+            let me-b [M_E] of partner / max (list 1 [M_E_max] of partner)
+            let energy-factor (me-a + me-b) / 2
+            ;; Vector 3: Topológico — red aloparental de apoyo
+            let support-w sum [weight] of my-links
+            let support-factor min (list 1 (0.3 + support-w * 0.15))
+            ;; Vector 4: Sociocultural — expectativas y pertenencia
+            let future-factor 0.3 + expect-future * 0.7
+            ;; Fertilidad K: mercado de capital incorporado
+            let k-fertility birth-rate * bio-factor * energy-factor
+                       * support-factor * future-factor
+                       / max (list 0.5 embodied-cap-cost)
+            if random-float 1 < k-fertility [
+                if children-count >= 10 [stop]
+                ;; Crear hijo con herencia de AMBOS padres
+                hatch 1 [
+                    set age 0
+                    set T_critica? true
+                    ;; §21.3 Herencia cognitiva: bonus educativo a M_Ω (NO al piso genético)
+                    let momega-base 2 + random 4
+                    set M_Omega min (list 15 (momega-base + edu-M_Omega-bonus + random-normal 0 0.5))
+                    set M_Omega_floor ifelse-value (random-float 1 < 0.15) [1] [2 + random 2]
+                    set G_vuln? random-float 1 < 0.15
+                    ;; Herencia educativa
+                let parent-bonus ifelse-value ([edu-level] of myself >= 2) [0.25] [ifelse-value ([edu-level] of myself >= 1) [0.15] [0]]
+                ifelse random-float 1 < (edu-access + parent-bonus) [
+                    set edu-level ifelse-value (random-float 1 < 0.05) [2] [1]
+                    set M_Omega min (list 15 (M_Omega + 1 + random 2))
+                    set dEp min (list 8 (dEp + 0.5))
+                ] [set edu-level 0]
+                set children-count 0
+                ;; §22.3: Herencia de rigidez familiar — σ_pref inflado si parent es rigid
+                if [state] of myself = 3 or [institutional-friction] of myself > 0.5 [
+                    set sigma-pref-per min (list 1.0 (sigma-pref-per + 0.15))
+                    set sigma-pred-exogrupo min (list 3.0 (sigma-pred-exogrupo * 1.2))
+                ]
+                ;; Herencia promediada de ambos padres
+                set M_E_max (([M_E_max] of myself + [M_E_max] of partner) / 2) * (0.8 + random-float 0.4)
+                if M_E_max < 20 [set M_E_max 20]
+                set M_E_max_original M_E_max
+                set M_E M_E_max * 0.3
+                set A_load 0
+                set alpha-crit-personal alpha-crit
+                set dEp (([dEp] of myself + [dEp] of partner) / 2) * (0.8 + random-float 0.4)
+                if edu-dEp-bonus != 0 [set dEp min (list 8 (dEp + edu-dEp-bonus + random-normal 0 0.1))]
+                if dEp < 0.3 [set dEp 0.3] if dEp > 8 [set dEp 8]
+                set dEp_prestado 0
+                set sigma-pred-sh ([sigma-pred-sh] of myself * (0.7 + random-float 0.6))
+                if edu-sigma-bonus != 0 [set sigma-pred-sh max (list 0.04 (sigma-pred-sh * (1 + edu-sigma-bonus)))]
+                if sigma-pred-sh < 0.04 [set sigma-pred-sh 0.04]
+                if sigma-pred-sh > 3 [set sigma-pred-sh 3]
+                set sigma-pred-sr 0.04 + random-float 0.1
+                set sigma-pred-social 0.3 + random-float 0.4
+                set sigma-pred-exogrupo ([sigma-pred-social] of myself + [sigma-pred-social] of partner) / 2
+                set sigma-pref-seg 0.7 + random-float 0.3
+                set sigma-pref-per 0.4 + random-float 0.5
+                set sigma-pref-comp 0.3 + random-float 0.4
+                set a-cog-type [a-cog-type] of myself
+                if random-float 1 < 0.1 [set a-cog-type random 3]
+                set sigma-epi-base 0.04
+                set early-stress 0
+                set state 0
+                set group-ids [group-ids] of myself
+                set identity-cohesion [identity-cohesion] of myself
+                set institution-ids [institution-ids] of myself
+                set role-weights [role-weights] of myself
+                set institutional-friction 0
+                set is-therapeutic? false
+                set nt-specialty -1
+                set role-weights []
+                set partner-id 0
+                set parent-id [who] of myself  ;; vinculado al padre/madre que hizo el hatch
+                set gap-history []
+                set M_Omega_perceived M_Omega
+                set anomaly-seed false set anomaly-adopters 0
+                set defeat-count 0
+                set last-gap-frec 0 set last-gap-expec 0 set last-dmg 0 set extra-stress 0
+                set M-int 0
+                set expect-effort [expect-effort] of myself * (0.8 + random-float 0.4)
+                set expect-fair [expect-fair] of myself * (0.8 + random-float 0.4)
+                set expect-future [expect-future] of myself * (0.8 + random-float 0.4)
+                if expect-effort > 1 [set expect-effort 1]
+                if expect-fair > 1 [set expect-fair 1]
+                if expect-future > 1 [set expect-future 1]
+                set expect-validated 0
+                set anchored-expect [] set cid-oscillation 0
+                set expect-type ifelse-value (random-float 1 < 0.7) ["cognitive"] ["normative"]
+                ;; Conectarse al padre
+                ;; Conectarse al otro progenitor si existe (pareja)
+                let other-parent [partner-id] of myself
+                if other-parent > 0 [
+                    create-link-with turtle other-parent [set weight 1.0 set link-type 1 set history 0 set institution-link-id 0 set channel-weights [0.5 0.5 0.5 1.0]]
+                ]
+                create-link-with myself [set weight 1.0 set link-type 1 set history 0 set institution-link-id 0 set channel-weights [0.5 0.5 0.5 1.0]]
+                ;; Posicion: cerca del progenitor
+                setxy [xcor] of myself + random-normal 0 1.5 [ycor] of myself + random-normal 0 1.5
+                set shape "circle" set size 1.0 set color 87
+              ]
+              ;; Ambos padres pagan costo energetico
+              set M_E max (list 0 (M_E - 5))
+              ask partner [set M_E max (list 0 (M_E - 3))]
+            ]
+          ]
+        ]
+
+        ;; Estrategia r (bifurcación): P_vital bajo → fertilidad compensatoria
+        ;;   Sin requisitos de energía ni estado fluid. Cualquier agente en edad
+        ;;   reproductiva puede concebir. Contrapartida: mortalidad infantil alta.
+        if P_vital < 0.3 [
+          ask turtles with [state != 3 and age >= (age-adult-min - 20) and age < age-fertile-max] [
+            ;; r-strategy: sigmoide de desesperacion
+            let r-activation 1 / (1 + exp(-8 * ((1 - P_vital) - 0.45)))
+            let infant-mort (1 - P_vital) * 2 * (1 - edu-access * 0.5)
+            let r-fertility birth-rate * r-activation * 3.0 / max (list 0.5 embodied-cap-cost)
+            if random-float 1 < r-fertility [
+
+            if children-count >= 10 [stop]
+              hatch 1 [
+                set age 0 set T_critica? true
+                set M_Omega max (list 1 (1 + random 2 + edu-M_Omega-bonus * 0.5))
+                set M_Omega_floor 1   ;; piso genético no se modifica
+                set G_vuln? random-float 1 < 0.25
+                ;; Herencia educativa (r-strategy: menor bonus)
+                let parent-bonus ifelse-value ([edu-level] of myself >= 1) [0.10] [0]
+                ifelse random-float 1 < (edu-access * 0.5 + parent-bonus) [
+                    set edu-level 1
+                    set M_Omega min (list 15 (M_Omega + 1 + random 1))
+                ] [set edu-level 0]
+                set children-count 0
+                ;; §22.3: Herencia de rigidez familiar — σ_pref inflado si parent es rigid
+                if [state] of myself = 3 or [institutional-friction] of myself > 0.5 [
+                    set sigma-pref-per min (list 1.0 (sigma-pref-per + 0.20))
+                    set sigma-pred-exogrupo min (list 3.0 (sigma-pred-exogrupo * 1.3))
+                ]
+                set M_E_max mInit * (0.3 + random-float 0.3)
+                set M_E_max_original M_E_max
+                set M_E M_E_max * 0.3
+                set A_load 5 + random-float 10
+                set alpha-crit-personal alpha-crit
+                set dEp dEpMu * (0.5 + random-float 0.3)
+                if edu-dEp-bonus != 0 [set dEp max (list 0.3 (dEp + edu-dEp-bonus * 0.5))]
+                set sigma-pred-sh shMu * (1 + random-float 0.5)
+                set sigma-pred-exogrupo shMu * (1 + random-float 0.5)  ;; heredado de la población
+                set state 0 set M-int 0
+                set group-ids [] set identity-cohesion []
+                set institution-ids [] set role-weights []
+                set institutional-friction 0
+                set partner-id 0 set parent-id [who] of myself
+                ;; Conectarse al progenitor
+                create-link-with myself [set weight 1.0 set link-type 1 set history 0 set institution-link-id 0 set channel-weights [0.5 0.5 0.5 1.0]]
+                let other-parent [partner-id] of myself
+                if other-parent > 0 [
+                    create-link-with turtle other-parent [set weight 1.0 set link-type 1 set history 0 set institution-link-id 0 set channel-weights [0.5 0.5 0.5 1.0]]
+                ]
+                setxy [xcor] of myself + random-normal 0 2 [ycor] of myself + random-normal 0 2
+                set shape "circle" set size 0.8 set color 47
+              if random-float 1 < infant-mort [die]
+              ]
+              set M_E max (list 0 (M_E - 1))  ;; costo mínimo
+            ]
+          ]
+          ;; Contrapartida r: mortalidad infantil aumentada
+          ask turtles with [age < 40 and M_E < M_E_max * 0.15] [
+            if random-float 1 < (1 - P_vital) * 0.008 [die]
+          ]
+        ]
+
+      ]  ;; cierra if dynamic-pop?
+
+    ;; ─── FASE 4e: GENERACION ENDOGENA DE EVENTOS COMUNICATIVOS (Micro → Meso → Macro) ───
+    ;;   Cada interaccion entre dos agentes activos tiene probabilidad de generar
+    ;;   un evento comunicativo. Pasa por tres capas:
+    ;;     1. Micro: estado y gap de cada agente
+    ;;     2. Meso: la interaccion ocurre via Ω_red (links)
+    ;;     3. Macro: F_op filtra (h-de-acoplamiento) — no toda interaccion es comunicacion
+    ;;   dEs-events contribuye a dEs-eff junto con dEs (estructural) y dEs-demo (demografico).
+    set event-count-econ 0 set event-count-pol 0 set event-count-der 0 set event-count-afect 0
+    ask links [
+        let a end1 let b end2
+        let state-a [state] of a let state-b [state] of b
+        ;; Solo agentes activos generan eventos (Arigid esta fuera del sistema)
+        if state-a != 3 and state-b != 3 [
+        ;; Capa 1 — Micro: peso del estado de cada agente
+        ;;   fluid=0.3, tight=1.0, isolated=0.1, cid=0.8 — el malestar genera mas eventos
+        let state-weight-a ifelse-value (state-a = 0) [0.3] [
+            ifelse-value (state-a = 1) [1.0] [
+            ifelse-value (state-a = 2) [0.1] [0.8]  ;; cid=4
+            ]
+        ]
+        let state-weight-b ifelse-value (state-b = 0) [0.3] [
+            ifelse-value (state-b = 1) [1.0] [
+            ifelse-value (state-b = 2) [0.1] [0.8]
+            ]
+        ]
+        ;; Magnitud del encuentro: gap promedio + sigma activo
+        let gap-a abs ([last-gap-frec] of a)
+        let gap-b abs ([last-gap-frec] of b)
+        let sigma-a [sigma-pred-sh] of a
+        let sigma-b [sigma-pred-sh] of b
+        let encuentro-intensity (gap-a * sigma-a + gap-b * sigma-b) / 2
+        ;; Capa 2 — Meso: centralidad en Ω_red (agentes mas conectados generan mas impacto)
+        let centrality-a sum [weight] of [my-links] of a / max (list 1 current-N)
+        let centrality-b sum [weight] of [my-links] of b / max (list 1 current-N)
+        let avg-centrality (centrality-a + centrality-b) / 2
+        ;; Probabilidad base de que esta interaccion genere un evento comunicativo
+        let p-event state-weight-a * state-weight-b * (0.5 + encuentro-intensity * 0.2) * (0.5 + avg-centrality * 2)
+        ;; Capa 3 — Macro: F_op filtra (mismo h que para la demografia)
+        let f-op-filter F-op
+        let p-coded p-event * f-op-filter
+        ;; Si pasa el filtro, cuenta como evento comunicativo
+        if random-float 1 < p-coded [
+            ;; Clasificar evento por canal dominante del tensor (§3c)
+            let ch-list channel-weights
+            let max-ch max ch-list
+            let ch-idx position max-ch ch-list
+            if ch-idx = 0 [set event-count-econ event-count-econ + 1]
+            if ch-idx = 1 [set event-count-pol event-count-pol + 1]
+            if ch-idx = 2 [set event-count-der event-count-der + 1]
+            if ch-idx = 3 [set event-count-afect event-count-afect + 1]
+        ]
+        ;; Si la interaccion es muy intensa y los agentes tienen alta M_Omega,
+        ;; puede generar una anomalia (MEGA Fase 1) incluso sin que llegue a comunicacion
+        ;;   §fix: MEGA requiere M_E > 30% — sin energía no hay innovación.
+        ;;   Sin este gate, el estrés generaba MEGA, expandiendo M_Ω cuando
+        ;;   justamente debería contraerse (dirección opuesta a la teoría).
+        if encuentro-intensity > 2.0 and [M_Omega] of a >= 4 and [M_E] of a > [M_E_max] of a * 0.3 and random-float 1 < 0.05 [
+            ask a [set anomaly-seed true set anomaly-adopters 0]
+        ]
+        if encuentro-intensity > 2.0 and [M_Omega] of b >= 4 and [M_E] of b > [M_E_max] of b * 0.3 and random-float 1 < 0.05 [
+            ask b [set anomaly-seed true set anomaly-adopters 0]
+        ]
+        ]
+    ]
+    ;; dEs-events: suma ponderada de eventos por canal, filtrados por su F_op respectivo
+    let n-ev max (list 1 current-N)
+    set dEs-events (
+        (event-count-afect / n-ev) * F-op-afect * 0.2 +
+        (event-count-econ  / n-ev) * F-op-econ  * 0.1 +
+        (event-count-pol   / n-ev) * F-op-pol   * 0.1 +
+        (event-count-der   / n-ev) * F-op-der   * 0.1
+    )
+    if dEs-events > 2 [set dEs-events 2]
+
+    ;; ─── FASE 5: MEGA — Reconfiguración de la red ───
+
+    ;; ─── FASE 5a: MEGA Fase 1 — Fluctuacion: generacion de anomalias cognitivas ───
+    ;;   Agentes con alta M_Omega generan proto-ideas que pueden propagarse.
+    ;;   Si suficientes vecinos adoptan la anomalia, se convierte en conexion MEGA.
+
+    ;; Generacion: agentes con M_Omega >= 4 y state=0 pueden crear anomalias
+    ;;   Modulacion boserupiana (9.3b): en regimen morfogenico, la densidad
+    ;;   aumenta la probabilidad de innovacion (ρ cerca de ρ_crit → mas MEGA)
+    let boserup-mul ifelse-value (regime-dem = 1) [
+        1 + (current-N / max (list 1 rho-crit)) * 0.5
+    ][1]
+    ask turtles with [M_Omega >= 4 and state = 0 and not anomaly-seed and M_E > M_E_max * 0.5] [
+        if random-float 1 < 0.08 * boserup-mul [   ;; 8% modulado por regimen
+        set anomaly-seed true
+        set anomaly-adopters 0
+        ]
+    ]
+
+    ;; Propagacion: los vecinos de un agente con anomalia pueden adoptarla
+    ;;   La probabilidad esta modulada por el peso del link (lazos fuertes transmiten mejor)
+    ask turtles with [anomaly-seed and anomaly-adopters < 4] [
+        ask link-neighbors with [state != 3 and M_Omega >= 2] [
+        let the-link link-with myself
+        if the-link != nobody [
+            let w [weight] of the-link
+            if random-float 1 < 0.25 * w [   ;; peso modula la transmision
+            set anomaly-adopters anomaly-adopters + 1
+            ]
+        ]
+        ]
+    ]
+
+    ;; Si la anomalia alcanza masa critica (≥ 3 adoptantes) → MEGA Fase 2
+    ask turtles with [anomaly-seed and anomaly-adopters >= 3] [
+        ;; La anomalia se convierte en nueva conexion MEGA con un no-vecino
+        let candidates other turtles with [
+        state != 3 and not link-neighbor? myself and not shares-group? myself self
+        ]
+        if any? candidates [
+        let new-tgt one-of candidates
+        create-link-with new-tgt [set color 65 set thickness 0.1 set weight 1.0 set channel-weights [0.5 0.5 0.5 1.0]]
+        set mega-edges mega-edges + 1
+        ;; La creacion de la conexion expande M_Omega del creador
+        ;;   §fix: expansión reducida de 0.5→0.05. 0.5 era 100× más rápido
+        ;;   que la degradación por acoplamiento M_Ω↔M_E, impidiendo el colapso.
+        if A_load < alpha-crit-personal [set M_Omega min (list 15 (M_Omega + 0.05))]
+        ;; ─── Filtro de legitimidad (§9.5): el cambio estructural debe seguir
+        ;;   el procedimiento del meta-anclaje. Si meta-anchor-strength es bajo,
+        ;;   el cambio MEGA puede ser ILEGÍTIMO (captura).
+        if meta-anchor-strength < 0.3 and ISS-active? [
+            set legitimacy-cascade true
+            ask turtles with [state != 3 and (expect-type = "normative" or meta-anchor-strength > 0.2)] [
+            set extra-stress extra-stress + 0.3
+            set A_load A_load + 0.02
+            ]
+        ]
+        ]
+        set anomaly-seed false
+        set anomaly-adopters 0
+        set break-memory []
+        set edu-level 0
+        set children-count 0
+    ]
+
+    ;; ─── FASE 5b: MEGA Fase 2 — Reconfiguracion por alta energia ───
+    set emitters 0
+    ask turtles with [state = 0 and M_E > M_E_max * 0.8 and M_Omega >= 5] [
+        set emitters emitters + 1
+        let candidates other turtles with [
+        state != 3 and not link-neighbor? myself and not shares-group? myself self
+        ]
+        let max-new min (list 2 count candidates)
+        if max-new > 0 [
+        let chosen n-of max-new candidates
+        create-links-with chosen [set color 65 set thickness 0.09 set weight 1.0 set channel-weights [0.5 0.5 0.5 1.0]]
+        set mega-edges mega-edges + count chosen
+        ]
+    ]
+    ;; dEs-eff con 3 fuentes: estructural (dEs), demografica (dEs-demo), endogena (dEs-events)
+    ;; dEs-events emerge de las interacciones reales entre agentes (FASE 4e)
+    set dEs-eff max (list 0.18 (dEs + dEs-demo + dEs-events - emitters * 0.012))
+
+    ;; ─── FASE 5c: Ω_sem — Propagacion de narrativas (modulada por desacoplamiento) ───
+    ;;   Si Ω_sem está desacoplado de Ω_red (§7.1), las narrativas se propagan
+    ;;   por valencia emocional pura, sin anclaje en líderes.
+    ;;   La probabilidad de emisión de narrativas es mayor (no hay filtro de líderes)
+    ;;   pero la efectividad es menor (narrativas sin anclaje no son estables).
+    let sem-propagation-mod ifelse-value omega-sem-decoupled [2.5] [1.0]
+    let sem-effectiveness-mod ifelse-value omega-sem-decoupled [0.4] [1.0]
+
+    ;; ─── FASE 5b: Ω_sem — Propagacion de narrativas ───
+    ;;   Agentes con alta M_Omega emiten narrativas que afectan σ_pred de vecinos.
+    ;;   Narrativa optimista (M_E alto, state=0) reduce σ_pred_sh en vecinos.
+    ;;   Narrativa pesimista (state=3) aumenta σ_pred_sh en vecinos.
+    ask turtles with [M_Omega >= 3 and state != 3] [
+        let narrative-sign ifelse-value (state = 0 and M_E > M_E_max * 0.7) [1 * sem-effectiveness-mod] [
+        ifelse-value (state = 3) [-1] [0]
+        ]
+        if narrative-sign != 0 [
+        ask other turtles in-radius 3 [
+            ;; La narrativa optimista reduce σ_pred_sh; la pesimista la aumenta
+            set sigma-pred-sh max (list sigma-epi-base (sigma-pred-sh - narrative-sign * 0.003))
+        ]
+        ]
+    ]
+
+    ;; ─── FASE 6: DETECCIÓN DE TRANSICIÓN DE FASE ───
+    compute-census
+    set rigid-frac c-rigid / max (list 1 current-N)
+    ;; Métricas normalizadas por vulnerabilidad genética (para testear hipótesis)
+    let n-vuln max (list 1 count turtles with [G_vuln?])
+    set rigid-of-vuln c-rigid / n-vuln
+    set distressed-frac (c-rigid + c-isolated + c-cid) / max (list 1 current-N)
+    ;; Limpiar memorias de ruptura antiguas (>500 ticks)
+    ask turtles [if length break-memory > 10 [set break-memory filter [b -> ticks - item 1 b < 500] break-memory]]
+    if rigid-frac >= 0.10 and phase-10 = -1 [set phase-10 ticks]
+    if rigid-frac >= 0.25 and phase-25 = -1 [set phase-25 ticks]
+    if rigid-frac >= 0.50 and phase-50 = -1 [set phase-50 ticks]
+
+    ;; ─── FASE 6b: I_germ — Cambio Catastrofico (§9.5b, §7.1 Laser Social) ───
+    ;;   Cuando el sistema esta supersaturado (muchos agentes cerca del colapso),
+    ;;   un evento aleatorio puede desatar una cascada de transiciones simultaneas.
+    ;;   NO es contagio (§6.2): cada agente colapsa INDEPENDIENTEMENTE porque
+    ;;   comparten condiciones de supersaturacion.
+    ;;   §fix: incluye agentes aislados con A_load alto y M_E bajo — están
+    ;;   en colapso real aunque gap-frec=0 (el aislamiento resetea el gap).
+    let near-collapse turtles with [state != 3 and (
+        (last-gap-frec > 0.8 and M_E < M_E_max * 0.25) or
+        (last-gap-expec > 1.2) or
+        (state = 2 and A_load > alpha-crit-personal * 0.5 and M_E < M_E_max * 0.15)
+    )]
+    set supersaturation count near-collapse / max (list 1 current-N)
+
+    ;; Si supersaturacion > 40%, hay probabilidad de germen cada tick.
+    ;; La velocidad demografica (bifurcation-risk) modula esta probabilidad:
+    ;;   riesgo 0: base 3%
+    ;;   riesgo 1: 6% (el doble)
+    ;;   riesgo 2: 12% (el cuadruple) — Corolario E: la aceleracion fuerza bifurcacion
+    let germ-prob 0.03 * ifelse-value (bifurcation-risk = 2) [4] [
+        ifelse-value (bifurcation-risk = 1) [2] [1]
+    ]
+    if supersaturation > 0.4 and germ-tick = 0 and random-float 1 < germ-prob [
+        set germ-tick ticks
+        ;; El germen golpea con fuerza adicional a todos los supersaturados
+        ask near-collapse [
+        set extra-stress extra-stress + 2.5
+        ;; Los agentes social-volatiles (a-cog-type=2) son mas vulnerables al germen
+        if a-cog-type = 2 [set extra-stress extra-stress + 1.5]
+        ;; Los agentes con sigma-epi-base alto (adversidad temprana) tambien
+        if sigma-epi-base > 0.3 [set extra-stress extra-stress + sigma-epi-base]
+        ]
+    ]
+
+    ;; ─── FASE 7: MOVIMIENTO (solo agentes fluid, modulado por M-int y Ω_arq) ───
+    ask turtles with [state = 0] [
+        ;; Dirección influenciada por valencia del espacio (Ω_sem)
+        let target-x xcor let target-y ycor
+        if M-int = 1 [
+        ;; Afiliación: moverse hacia pares que comparten algún grupo
+        let same-groupers other turtles with [shares-group? myself self and state != 3]
+        if any? same-groupers [
+            let centroid mean [xcor] of same-groupers
+            set target-x centroid
+        ]
+        ]
+        let move-x (target-x - xcor) * 0.1 + random-normal 0 0.5
+        let move-y (target-y - ycor) * 0.1 + random-normal 0 0.5
+        let sp sqrt (move-x * move-x + move-y * move-y)
+        if sp > 1.1 [set move-x move-x * 1.1 / sp set move-y move-y * 1.1 / sp]
+        setxy max (list min-pxcor (min (list max-pxcor (xcor + move-x))))
+            max (list min-pycor (min (list max-pycor (ycor + move-y))))
+    ]
+
+    ;; ─── AUTO-REBT (§interfaz): dispara REBT automáticamente cada 50 ticks ───
+    if auto-rebt? and ticks >= 200 and ticks mod 50 = 0 [
+        REBT
+    ]
+
+    ;; ─── MÉTRICAS DE ÉLITE (§Trickle-Up) ───
+    ;;   Top 10% más conectados. Su M_E revela el sangrado aloparental.
+    let elite (max-n-of max (list 1 round (current-N * 0.1)) turtles [count my-links])
+    let elite-M_E mean [M_E] of elite
+    let elite-M_E_max mean [M_E_max_original] of elite
+    let elite-ratio ifelse-value (elite-M_E_max > 0) [elite-M_E / elite-M_E_max] [0]
+    ;; Log de colapso de élite
+    if elite-ratio < 0.3 and elite-ratio > 0 and ticks mod 50 = 0 [
+        let rigid-elite count elite with [state = 3]
+        output-print (word "[t=" ticks "] ⚠ ÉLITE: M_E=" precision elite-M_E 1
+            " (" precision (elite-ratio * 100) 0 "% del max) | "
+            rigid-elite " de " count elite " líderes colapsados")
+    ]
+
+    ;; ─── AUTO-LOG (§interfaz): exporta métricas clave cada 50 ticks ───
+    if auto-log? and ticks mod 50 = 0 [
+        output-print (word "LOG-" ticks
+            " rigid=" precision (c-rigid / max (list 1 current-N) * 100) 1
+            "% M_E=" precision avg-M_E 1
+            " P_vital=" precision P_vital 3
+            " meta=" precision meta-anchor-strength 3
+            " gap=" precision (dEs-eff - avg-dep-eff) 3)
+    ]
+
+    ;; ─── VISUALIZACIÓN ───
+    update-tension-field
+    color-agents
+    color-links
+    update-plots2
+
+    ;; ─── LOG PERIÓDICO (cada 100 ticks) ───
+    if ticks mod 100 = 0 [
+        let n-groups-mean mean [length group-ids] of turtles
+        let n-inst-mean mean [length institution-ids] of turtles
+        let cohesion-mean mean [ifelse-value (empty? identity-cohesion) [0] [mean identity-cohesion]] of turtles
+        output-print (word "[" ticks "] rigid=" precision (rigid-frac * 100) 1 "%"
+            " | M_E=" precision avg-M_E 1 " | A_load=" precision avg-A_load 1
+            " | M_Ω=" precision avg-M_Omega 2 " | P_v=" precision P_vital 2
+            " | grupos/ag=" precision n-groups-mean 2
+            " | inst/ag=" precision n-inst-mean 2
+            " | cohesión=" precision cohesion-mean 2
+            " | dEs=" precision dEs-eff 2 " | gap=" precision (dEs-eff - avg-dep-eff) 2)
+    ]
+
+    ;; ─── Guardar valores para derivadas del próximo tick (FASE 0c) ───
+    set prev-avg-clustering avg-clustering
+    set prev-avg-M_Omega avg-M_Omega
+    set prev-avg-M_E avg-M_E
+
+    ;; ─── §22.8: Suspensión deliberativa — reducir dEs/dt en canales políticos ───
+    update-deliberation
+    ;; ─── §Ecología: Movimiento Schelling — segregación emergente ───
+    schelling-move
+
+    if ied-occurred? [ied-update]
+
+    tick
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; PASO 5: INTERVENCIONES — Mediadas por N_t y σ_confianza
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;;
+    ;; A diferencia del ABM original, las intervenciones NO son botones que modifican
+    ;; directamente el estado. Son INTERACCIONES entre N_t (nodos terapéuticos) y S
+    ;; (sistema objetivo), mediadas por σ_confianza. §6.11: las intervenciones son
+    ;; eventos emergentes, no inputs externos.
+
+    ;; 🧠 REBT — Expansion Topologica mediada por N_t con D_ter (especializacion)
+    ;;    La efectividad depende del match entre nt-specialty y a-cog-type.
+    ;;    N_t generico funciona para tipicos; N_t especializado para su tipo.
+    ;;    Sin match, la intervencion es mucho menos efectiva (friccion esteril).
+    ;;    §fix: REBT también intenta alcanzar rígidos (state=3), pero con
+    ;;    efectividad reducida al 10% — refleja la dificultad real de tratar
+    ;;    el Atractor Rígido consolidado (§11.6: Atractor Profundo).
+    to REBT
+    let treated 0
+    ;; Tight agents: ventana normal de intervención
+    ask turtles with [state = 1 and M_E > 5] [
+        let therapist one-of link-neighbors with [is-therapeutic?]
+        if therapist != nobody [
+        let trust-open [sigma-pred-social] of self > 0.2
+        let threat-closed [sigma-pred-sh] of self < 2.0
+        if trust-open and threat-closed [
+            let nt-spec [nt-specialty] of therapist
+            let effectiveness 1.0
+            ifelse nt-spec = -1 [
+            if a-cog-type != 0 [set effectiveness 0.35]
+            ][
+            ifelse nt-spec = a-cog-type [set effectiveness 1.5] [set effectiveness 0.15]
+            ]
+            set sigma-pred-sh max (list sigma-epi-base (sigma-pred-sh * (1 - 0.15 * effectiveness)))
+            set sigma-pred-social min (list 1 (sigma-pred-social + 0.03 * effectiveness))
+            ask therapist [
+            set M_E max (list 0 (M_E - 0.3))
+            set M_Omega min (list 15 (M_Omega + 0.01 * effectiveness))
+            ;; Registrar rol de ayudante en esta institución
+            if not empty? institution-ids [
+                let idx 0
+                set role-weights map [rw -> ifelse-value (idx = 0) [1.0] [rw]] role-weights
+            ]
+            ]
+            set state 0 set prev-state 1
+            ;; Registrar rol de receptor
+            if not empty? institution-ids [
+                set role-weights lput 0.5 role-weights
+            ]
+            set treated treated + 1
+        ]
+        ]
+    ]
+    ;; Rigid agents: intervención posible pero extremadamente difícil
+    ask turtles with [state = 3] [
+        let therapist one-of link-neighbors with [is-therapeutic?]
+        if therapist != nobody [
+        let trust-open [sigma-pred-social] of self > 0.1
+        if trust-open [
+            let nt-spec [nt-specialty] of therapist
+            let effectiveness 0.1  ;; base 10× menor que para tight
+            ifelse nt-spec = -1 [
+            if a-cog-type != 0 [set effectiveness 0.05]
+            ][
+            ifelse nt-spec = a-cog-type [set effectiveness 0.2] [set effectiveness 0.02]
+            ]
+            ;; Solo el match óptimo tiene chance real de sacar de Arigid
+            if random-float 1 < effectiveness [
+            set M_E M_E_max * 0.25
+            set state 2  ;; isolated
+            set iso-ticks 8
+            set age-rigid 0
+            set prev-state 3
+            if M_Omega < 2 [set M_Omega M_Omega + 0.5]
+            ask therapist [
+                set M_E max (list 0 (M_E - 0.5))
+                set M_Omega min (list 15 (M_Omega + 0.02))
+                if not empty? institution-ids [
+                    set role-weights map [rw -> 1.0] role-weights
+                ]
+            ]
+            set treated treated + 1
+            ]
+        ]
+        ]
+    ]
+    output-print (word "🧠 REBT: " treated " agentes tratados (D_ter matching)")
+    color-agents
+    end
+
+    ;; 💊 Neuromodulación — Restitución Energética (ΔM_E)
+    ;;    Inyecta M_E directamente en Sbio. No requiere N_t cercano (es farmacológico),
+    ;;    pero sí requiere que exista al menos un N_t en la red (prescriptor).
+    ;;    La neuromodulación no "resetea" el estado; aumenta M_E para que el sistema
+    ;;    pueda eventualmente re-expandir M_Omega por sí mismo.
+    to Neuromod
+    let nts count turtles with [is-therapeutic?]
+    if nts = 0 [
+        output-print "💊 Neuromodulación: SIN EFECTO — no hay N_t (prescriptor) en la red"
+        stop
+    ]
+    let treated 0
+    ask turtles with [state = 3] [
+        ;; Restitución energética: inyectar M_E
+        set M_E M_E + M_E_max * 0.25
+        if M_E > M_E_max * 0.3 [
+        ;; Si M_E supera un umbral, el sistema puede empezar a salir de Arigid
+        set state 2
+        set iso-ticks 8
+        set age-rigid 0
+        set prev-state 3
+        ;; M_Omega empieza a re-expandirse lentamente
+        if M_Omega < 2 [set M_Omega M_Omega + 0.5]
+        set treated treated + 1
+        ]
+    ]
+    output-print (word "💊 Neuromodulación: " treated " agentes con ΔM_E > 0")
+    color-agents
+    end
+
+    ;; 🏙 Reconfiguración Meso — Suspensión Contingente (dEs/dt ↓)
+    ;;    Reestructura Ω_arq y Ω_sem para reducir la frecuencia de irritación.
+    ;;    Requiere N_t con suficiente centralidad en Ω_red.
+    to Meso
+    let nts turtles with [is-therapeutic? and count link-neighbors > 5]
+    if not any? nts [
+        output-print "🏙 Meso: SIN EFECTO — no hay N_t con suficiente centralidad"
+        stop
+    ]
+    ;; Los N_t con centralidad reconfiguran el entorno
+    set dEs-eff max (list 0.3 (dEs-eff * 0.5))
+    ;; Mejorar Ω_arq: aumentar accesibilidad de zonas seguras
+    ask patches with [valencia > 0] [
+        set accesibilidad min (list 1 (accesibilidad + 0.1))
+    ]
+    ;; Regenerar agentes no-rigid
+    let healed 0
+    ask turtles with [state = 1 or state = 2] [
+        set M_E min (list M_E_max (M_E + 20))
+        set healed healed + 1
+    ]
+    output-print (word "🏙 Meso: dEs reducido a " precision dEs-eff 2
+        ", " healed " agentes con ΔM_E, Ω_arq mejorado")
+    color-agents
+    end
+
+    ;; 📴 Desconexión Digital — Aislamiento Predictivo
+    ;;    A diferencia del ABM original, esto NO es forzado externamente.
+    ;;    Agenttes con Pred funcional (M_E > umbral) pueden aislarse voluntariamente
+    ;;    ANTES de que A_load se acumule (§5.2: Aislamiento Predictivo vs Reactivo)
+    to Disconnect
+    let isolated 0
+    ask turtles with [(state = 0 or state = 1) and M_E > M_E_max * 0.5] [
+        ;; Solo agentes con suficiente M_E pueden ejecutar Aislamiento Predictivo
+        if last-gap-frec > 0.7 or last-gap-expec > 1.0 [
+        set prev-state state
+        set state 2
+        set iso-ticks 8
+        set isolated isolated + 1
+        ]
+    ]
+    if isolated = 0 [
+        ;; Si ningún agente puede aislarse predictivamente, forzar aislamiento reactivo
+        ask turtles with [state = 0 or state = 1] [
+        if last-gap-frec > 0.9 [
+            set prev-state state set state 2 set iso-ticks 6
+            set isolated isolated + 1
+        ]
+        ]
+    ]
+    output-print (word "📴 Desconexión: " isolated " agentes aislados")
+    color-agents
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; UTILIDADES: Censo, clustering, visualización
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    to compute-census
+    set c-fluid 0 set c-tight 0 set c-isolated 0 set c-rigid 0 set c-cid 0
+    ask turtles [
+        if state = 0 [set c-fluid c-fluid + 1]
+        if state = 1 [set c-tight c-tight + 1]
+        if state = 2 [set c-isolated c-isolated + 1]
+        if state = 3 [set c-rigid c-rigid + 1]
+        if state = 4 [set c-cid c-cid + 1]
+    ]
+    ;; Cache de grupos identitarios para §22 (evita recalcular en demonización y cooptación)
+    set all-group-ids remove-duplicates reduce sentence [group-ids] of turtles
+    end
+
+    to calculate-clustering
+    if count links = 0 [set avg-clustering 0 stop]
+    let total-coeff 0 let eligible 0
+    ask turtles [
+        let nb link-neighbors
+        let n count nb
+        if n >= 2 [
+        set eligible eligible + 1
+        let nb-list sort nb let triangles 0
+        let i 0
+        while [i < n] [
+            let n1 item i nb-list
+            let j i + 1
+            while [j < n] [
+            let n2 item j nb-list
+            if member? n2 [link-neighbors] of n1 [set triangles triangles + 1]
+            set j j + 1
+            ]
+            set i i + 1
+        ]
+        let possible n * (n - 1) / 2
+        set total-coeff total-coeff + (triangles / possible)
+        ]
+    ]
+    ifelse eligible > 0 [set avg-clustering total-coeff / eligible] [set avg-clustering 0]
+    end
+
+    to update-tension-field
+    ask patches [set tension 0]
+    ask turtles with [state = 3] [
+        ask patches in-radius 3 [
+        let dist distance myself
+        let contrib max (list 0 (1 - dist / 3)) * 0.22
+        set tension tension + contrib
+        ]
+    ]
+    ask patches [
+        ifelse tension > 0.01 [
+        set pcolor scale-color red (min (list 1 tension)) 0 1
+        ][
+        set pcolor 0
+        ]
+    ]
+    end
+
+    to color-agents
+    ask turtles [
+        ;; Tamaño universal basado en M_E (0.8 = minimo, 2.0 = maximo)
+        let en-size 0.2 + (M_E / max (list 1 M_E_max)) * 0.3   ;; min 0.2, max 0.5
+        set size en-size
+
+        ifelse is-therapeutic? [
+        set shape "star" set color 67  ;; violeta
+        ][
+        ifelse state = 0 [
+        ifelse M_E >= M_E_max * 0.8 and M_Omega >= 5 [
+            set shape "circle" set color 97  ;; MEGA: cyan brillante
+        ][
+            let norm M_E / max (list 1 M_E_max)
+            set shape "circle" set color 85 + norm * 12
+        ]
+        ][
+        ifelse state = 1 [
+        set shape "circle" set color 45  ;; amarillo
+        ][
+        ifelse state = 2 [
+        set shape "circle" set color 26  ;; naranja
+        ][
+        ifelse state = 4 [
+        set shape "triangle" set color 126 + random 5  ;; magenta
+        ][
+        ;; state = 3 (rigid)
+        let shade 15 - (age-rigid / (55 / 6 * ticks-per-year)) * 8
+        if shade < 3 [set shade 3]
+        set shape "target" set color shade  ;; rojo oscuro
+        ]]]]]
+    ]
+    end
+
+    to color-links
+    ask links [
+        ;; Color por tipo de enlace (link-type)
+        ;;   proto=0:marron, parentesco=1:naranja, amistad=2:verde,
+        ;;   poder=3:violeta, publico=4:gris, autoridad=5:cian
+        let hue ifelse-value (link-type = 1) [25] [
+        ifelse-value (link-type = 2) [65] [
+            ifelse-value (link-type = 3) [115] [
+            ifelse-value (link-type = 4) [95] [
+                ifelse-value (link-type = 5) [87] [35]
+            ]
+            ]
+        ]
+        ]
+        ;; Instituciones: si ambos comparten al menos una institución, resaltar
+        let a end1 let b end2
+        let same-inst [institution-link-id] of self > 0 and shares-inst? a b
+        let bright ifelse-value same-inst [1.5] [1.0]
+        ;; Grosor modulado por peso, atenuado si hay Arigid
+        let state-a [state] of a let state-b [state] of b
+        let thick ifelse-value (state-a = 3 or state-b = 3) [weight * 0.025] [weight * 0.12]
+        set color hue * bright set thickness thick set hidden? (weight < 0.05)
+    ]
+    end
+
+    to update-plots2
+    ;; ═══ PLOT 1: Espacio de Fase de la Metastabilidad (M_E vs M_Ω) ═══
+    ;;   Cada agente es un punto. La nube migra hacia la esquina inferior
+    ;;   izquierda (Arigid: M_Ω→1, M_E→0) cuando el sistema colapsa.
+    set-current-plot "Espacio de Fase"
+    clear-plot
+    set-plot-pen-mode 2  ;; point mode (scatter)
+    set-current-plot-pen "activo"
+    set-plot-pen-color cyan
+    ask turtles with [state = 0 or state = 1] [plotxy M_E M_Omega]
+
+    set-current-plot-pen "aislado"
+    set-plot-pen-mode 2           ;; ← para cada pen
+    set-plot-pen-color yellow
+    ask turtles with [state = 2] [plotxy M_E M_Omega]
+    set-current-plot-pen "cid"
+    set-plot-pen-color orange
+    ask turtles with [state = 4] [plotxy M_E M_Omega]
+    set-current-plot-pen "rigido"
+    set-plot-pen-color red
+    ask turtles with [state = 3] [plotxy M_E M_Omega]
+
+    ;; ═══ PLOT 2: Paisaje de Bifurcacion (A_load, varianza, rigid-frac) ═══
+    set-current-plot "Paisaje de Bifurcacion"
+    let momega-var ifelse-value (count turtles > 1) [variance [M_Omega] of turtles] [0]
+    set-current-plot-pen "A_load"      plot avg-A_load / 50
+    set-current-plot-pen "Var(M_Omega)" plot momega-var
+    set-current-plot-pen "rigid-frac"   plot rigid-frac
+
+    ;; ═══ PLOT 3: Inecuacion Termodinamica (dEs vs dEp vs Gap) ═══
+    set-current-plot "Inecuacion Termodinamica"
+    let dEp-total avg-dep-eff + mean [dEp_prestado] of turtles
+    let gap-net dEs-eff - dEp-total
+    set-current-plot-pen "dEs-eff"       plot dEs-eff / 5
+    set-current-plot-pen "dEp+prestado"  plot dEp-total / max (list 0.1 dEpMu)
+    set-current-plot-pen "Gap (dEs-dEp)" plot gap-net / 5
+
+    ;; ═══ PLOT 4: Tensor de Expectativas y Previsibilidad ═══
+    set-current-plot "Expectativas y Previsibilidad"
+    let pvital-sd standard-deviation [expect-validated] of turtles
+    let link-density count links / max (list 1 current-N)
+    set-current-plot-pen "P_vital"        plot P_vital
+    set-current-plot-pen "densidad-links"  plot link-density
+    set-current-plot-pen "SD(P_vital)"     plot pvital-sd / 3
+    set-current-plot-pen "meta-anchor"     plot meta-anchor-strength
+end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; REPORTERS — 7 Monitores Estratégicos
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    ;; A. PARÁMETROS DE ORDEN (Macroscópicos)
+    to-report pct-rigid
+        report precision (c-rigid / max (list 1 current-N) * 100) 1
+    end
+    to-report current-pvital
+        report precision P_vital 3
+    end
+    to-report current-clustering
+        report precision avg-clustering 3
+    end
+
+to-report zombie-anchor-count
+  report count turtles with [
+    not empty? (filter [p -> item 1 p = "institution"] anchored-expect)
+    and empty? institution-ids
+  ]
+end
+
+    ;; B. PARÁMETROS DE CONTROL (Tensión del Entorno)
+    to-report current-gap
+        let dEp-total avg-dep-eff + mean [dEp_prestado] of turtles
+        report precision (dEs-eff - dEp-total) 3
+    end
+    to-report current-aload
+        report precision avg-A_load 2
+    end
+
+    ;; C. MÉTRICAS DE TRANSICIÓN (Derivadas)
+    to-report current-momega-var
+        report precision variance [M_Omega] of turtles 3
+    end
+    to-report current-regime-str
+        ;; Clasifica el estado matricial del sistema en tiempo real.
+        ;; Cruza rigid-frac, gap, y P_vital para identificar el escenario.
+        let dEp-total avg-dep-eff + mean [dEp_prestado] of turtles
+        let gap-now dEs-eff - dEp-total
+        ifelse rigid-frac > 0.25 [
+            report "COLAPSO CINETICO"
+        ] [
+        ifelse supersaturation > 0.4 [
+            report "LASER SOCIAL INMINENTE"
+        ] [
+        ifelse P_vital > 0.6 and gap-now < 0.2 [
+            report "I: Individualizacion Activa"
+        ] [
+        ifelse P_vital > 0.6 and gap-now > 0.5 [
+            report "I→II: Burnout Incipiente"
+        ] [
+        ifelse P_vital < 0.4 and avg-M_E > mInit * 0.4 [
+            report "II: Crisis de Expectativas"
+        ] [
+        ifelse P_vital < 0.3 and rigid-frac > 0.1 [
+            report "II→IV: Desintegracion"
+        ] [
+        ifelse avg-M_Omega > 6 and gap-now < 0.3 [
+            report "III: Tradicional Estable"
+        ] [
+            report "TRANSICION"
+        ]]]]]]]
+    end
+
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; §22.5 — ESTEREOTIPOS: σ_pred_exogrupo inflado por segregación topológica
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    to update-stereotype
+        ask turtles [
+            if empty? group-ids [stop]
+            let neighbors-with-same-group 0
+            let total-neighbors count link-neighbors
+            if total-neighbors > 0 [
+                ask link-neighbors [
+                    if not empty? group-ids and not empty? [group-ids] of myself [
+                        if not empty? (filter [g -> member? g [group-ids] of myself] group-ids) [
+                            set neighbors-with-same-group neighbors-with-same-group + 1
+                        ]
+                    ]
+                ]
+                let homophily neighbors-with-same-group / total-neighbors
+                ;; Segregación → inflar σ_pred_exogrupo (sin contra-evidencia)
+                if homophily > 0.8 [
+                    set sigma-pred-exogrupo min (list 3.0 (sigma-pred-exogrupo + 0.002))
+                ]
+                ;; Exposición al exogrupo → σ_aprendizaje de seguridad
+                if homophily < 0.5 [
+                    set sigma-pred-exogrupo max (list sigma-pred-social (sigma-pred-exogrupo - 0.003))
+                ]
+            ]
+            ;; 22.5: la educacion permite cuestionar prejuicios
+            if hostile? and sigma-pred-exogrupo > sigma-pred-social * 1.5 [
+                ifelse edu-level >= 1 [
+                    set sigma-pred-exogrupo max (list sigma-pred-social (sigma-pred-exogrupo - 0.001))
+                ] [
+                    set sigma-pred-sh min (list 3.0 (sigma-pred-sh + (sigma-pred-exogrupo - sigma-pred-social) * 0.02))
+                ]
+            ]
+        ]
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; §22.6 — DEMONIZACIÓN: Ruido Q vectorizado sobre poblaciones-chivo
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    to apply-demonization
+        if not hostile? [stop]
+        if meta-anchor-strength > 0.3 [stop]
+        ;; Identificar grupos minoritarios (<20% de la población)
+        foreach all-group-ids [g ->
+            let group-size count turtles with [member? g group-ids]
+            let group-frac group-size / max (list 1 current-N)
+            if group-frac > 0 and group-frac < 0.20 [
+                ;; Buscar un demonizador: nodo con alta centralidad externo al grupo
+                let demonizers turtles with [
+                    count link-neighbors > 5 and not member? g group-ids and state != 3
+                ]
+                if any? demonizers [
+                    let demonizer max-one-of demonizers [count link-neighbors]
+                    ask [link-neighbors] of demonizer [
+                        if not member? g group-ids [
+                        if edu-level >= 2 [stop]
+                        if edu-level >= 1 [
+                            set sigma-pred-exogrupo min (list 3.0 (sigma-pred-exogrupo + 0.02))
+                            stop
+                        ]
+                            set sigma-pred-exogrupo min (list 3.0 (sigma-pred-exogrupo + 0.05))
+                            if P_vital < 0.3 [
+                                set M-int ifelse-value (M-int < 2) [2] [3]
+                                set extra-stress extra-stress + 0.2
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; §22.7 — COOPTACIÓN: Absorción táctica de líderes disidentes
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    to apply-cooptation
+        if meta-anchor-strength > 0.3 [stop]
+        foreach all-group-ids [g ->
+            let members turtles with [member? g group-ids]
+            let n-members count members
+            if n-members < 3 [stop]
+            let avg-cohesion mean [mean identity-cohesion] of members
+            let inst-less-frac count members with [empty? institution-ids] / n-members
+            ;; Grupo disidente: cohesion > 0.6, sin instituciones, masa > 5%
+            if avg-cohesion > 0.6 and inst-less-frac > 0.7 and n-members > current-N * 0.05 [
+                let leaders members with [count link-neighbors > 3]
+                if any? leaders [
+                    let top-leader max-one-of leaders [count link-neighbors]
+                    ifelse ISS-pressure > 0 [
+                        ;; Cooptación: recompensa asimétrica al líder → el movimiento se fragmenta
+                        ask top-leader [
+                            set institution-ids lput "cooptado" institution-ids
+                            set role-weights lput 0.85 role-weights
+                            set M_E min (list M_E_max (M_E + M_E_max * 0.4))
+                            set identity-cohesion map [c -> c * 0.3] identity-cohesion
+                        ]
+                    ] [
+                        ;; Fractura: sin apoyo externo, MEGA completa → presión sobre el Macro
+                        set meta-anchor-strength max (list 0 (meta-anchor-strength - 0.002))
+                        set social-exp-effort max (list 0.05 (social-exp-effort - 0.001))
+                    ]
+                ]
+            ]
+        ]
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; §22.4 — FILTRO ELECTORAL MEGA: Reducción de oferta de liderazgo N→2
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    to apply-mega-electoral-filter
+        if emitters <= 2 [stop]
+        if meta-anchor-strength < 0.2 [stop]
+        let candidates turtles with [anomaly-seed and count link-neighbors > 2]
+        if count candidates <= 2 [stop]
+        ;; Ordenar por centralidad y conservar solo los top 2
+        let ranked sort-by [[a b] -> [count link-neighbors] of a > [count link-neighbors] of b] candidates
+        let top2 sublist ranked 0 2
+        ask candidates [
+            if not member? self top2 [
+                set anomaly-seed false
+                set anomaly-adopters 0
+        set break-memory []
+        set edu-level 0
+        set children-count 0
+            ]
+        ]
+        set emitters count turtles with [anomaly-seed]
+        ;; §Ecología — Sucesión: cuando el filtro electoral fuerza un nuevo régimen,
+        ;;   las poblaciones periféricas son desplazadas espacialmente
+        if length top2 >= 2 and random-float 1 < 0.15 [
+            ask turtles with [wealth < 0.5 and count link-neighbors < 3] [
+                let periphery patches with [accesibilidad < 0.4 and valencia < 0]
+                if any? periphery [
+                    move-to one-of periphery
+                    set M_E max (list 0 (M_E - 0.5))
+                ]
+            ]
+        ]
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; §22.8 — SUSPENSIÓN DELIBERATIVA: Reducción de dEs/dt en canales políticos
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    to update-deliberation
+        ;; §23: Dos regímenes de deliberación según fuerza del meta-anclaje
+        ifelse meta-anchor-strength >= 0.5 [
+            ;; Deliberación plena: instituciones fuertes moderan el conflicto
+            let lambda-deliberacion (meta-anchor-strength - 0.5) * 0.5
+            set dEs-eff dEs-eff * (1 - lambda-deliberacion)
+        ] [
+            if meta-anchor-strength >= 0.35 [
+                ;; Deliberación débil (zona de deriva): instituciones frágiles aún atenúan
+                let lambda-deliberacion (meta-anchor-strength - 0.35) * 0.15
+                set dEs-eff dEs-eff * (1 - lambda-deliberacion)
+            ]
+        ]
+        ;; La deliberación permite σ_aprendizaje acelerado en agentes con M_psy > θ
+        ask turtles with [state = 0 and M_Omega > 2 and M_E > M_E_max * 0.4] [
+            if sigma-pred-sh > 0.1 [
+                set sigma-pred-sh sigma-pred-sh * 0.995
+            ]
+        ]
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; §Ecología Humana — SCHELLING: Movimiento por preferencia de similitud grupal
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    to schelling-move
+        ask turtles with [not empty? group-ids and state != 3] [
+            let me self  ;; capturar antes de entrar en contexto de patch
+            let others-here other turtles-here
+            if count others-here > 0 [
+                let similar count others-here with [shares-group? self me]
+                let similar-frac similar / count others-here
+                if similar-frac < 0.3 [
+                    let targets (patches in-radius 5) with [
+                        count turtles-here > 0 and
+                        (count (turtles-here with [shares-group? self me]) / count turtles-here) >= 0.3
+                        and accesibilidad > 0.3
+                    ]
+                    if any? targets [
+                        move-to one-of targets
+                        set M_E max (list 0 (M_E - 0.1))
+                    ]
+                ]
+            ]
+        ]
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; §Ecología Humana — EIGENVECTOR CENTRALITY (Dominancia como centralidad de 2° orden)
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    to-report eigenvector-centrality [t]
+        ;; Power iteration para grafo disperso (~20 pasos bastan)
+        let n count turtles
+        let scores n-values n [1.0]
+        repeat 20 [
+            let new-scores n-values n [0]
+            ask turtles [
+                let my-who who
+                let sum-neighbor 0
+                ask link-neighbors [
+                    set sum-neighbor sum-neighbor + item ([who] of self) scores
+                ]
+                set new-scores replace-item my-who new-scores sum-neighbor
+            ]
+            ;; Normalizar
+            let total sum new-scores
+            if total > 0 [
+                set scores map [s -> s / total] new-scores
+            ]
+        ]
+        report item ([who] of t) scores
+    end
+
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; DIAGNÓSTICO H5 — Consolidación Autoritaria
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    to-report count-momega-anomaly
+        ;; Agentes con A_load > alpha-crit pero M_Omega > 1 (inconsistencia teórica)
+        report count turtles with [A_load > alpha-crit-personal and M_Omega > 1]
+    end
+
+    to-report count-zombi-inst
+        ;; Agentes con anclaje institucional residual (legitimidad zombi)
+        report count turtles with [not empty? (filter [p -> item 1 p = "institution"] anchored-expect)]
+    end
+
+    to-report current-leader
+        ;; H5: ¿Hay un líder único consolidado?
+        ;;   Criterio: hub con >8 vecinos, alta energía, y >5 seguidores con anclaje personal
+        let hubs turtles with [count link-neighbors > 8 and M_E > M_E_max * 0.5]
+        if not any? hubs [report 0]
+        let max-hub max-one-of hubs [count link-neighbors]
+        let followers count turtles with [
+            not empty? (filter [p -> item 1 p = "person" and item 2 p = [who] of max-hub] anchored-expect)
+        ]
+        ifelse followers > 5 [report [who] of max-hub] [report 0]
+    end
+
+    to-report count-path4
+        ;; Veces que el Camino 4 (no-G_vuln extremo) se activó este tick
+        report count turtles with [not G_vuln? and A_load > alpha-crit-personal * 2 and state = 3]
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; INTERVENCION: Inversion Estatal en Educacion
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    to Invest-Education
+        if meta-anchor-strength < 0.25 [stop]
+        set edu-investment min (list 1.0 (edu-investment + 0.10))
+        set edu-access min (list 0.70 (edu-access + 0.03))
+        set P_vital max (list 0.02 (P_vital - 0.01))
+        output-print (word "Inversion educativa: acceso " precision (edu-access * 100) 0 "%")
+    end
+
+    to-report pct-educated
+        report precision (count turtles with [edu-level >= 1] / max (list 1 current-N) * 100) 1
+    end
+
+    to-report avg-age-years
+        report precision (mean [age] of turtles / ticks-per-year) 1
+    end
+
+
+    ;; ─── REPORTERS AUXILIARES (para monitores heredados o debug) ───
+    to-report avg-momega     report precision avg-M_Omega 2 end
+    to-report avg-me         report precision avg-M_E 1 end
+    to-report count-rigid    report c-rigid end
+    to-report current-nt     report n-therapeutic end
+    to-report current-meta   report precision meta-anchor-strength 2 end
+
+    ;; ─── MONITORES H5/ISS — Régimen autoritario y presión internacional ───
+    to-report current-extractors
+        ;; Captura democrática: ocurre con meta-anchor AÚN MODERADO (0.30, no 0.05).
+        ;; El extractor tiene ventaja relativa sobre sus vecinos.
+        report count turtles with [
+            meta-anchor-strength < 0.30
+            and count my-links > 5
+            and (M_E / max (list 1 M_E_max)) > 0.3
+            and mean [M_E / max (list 1 M_E_max)] of link-neighbors < 0.25
+        ]
+    end
+    to-report current-iss-effect
+        ;; §6.5b: Γ_ISS = presión externa neta. >0 = presión, <0 = aliados.
+        report precision ISS-pressure 3
+    end
+
+    to-report current-iss-drain
+        ;; M_E total drenado por ISS este tick (aproximado: ISS-pressure × 0.015 × M_E_max)
+        ifelse meta-anchor-strength < 0.3 and ISS-pressure > 0.1 [
+            let drained mean [ISS-pressure * M_E_max * 0.015] of turtles with [state = 3 or M_E > M_E_max * 0.6]
+            report precision drained 1
+        ] [
+            report 0
+        ]
+    end
+    to-report current-control
+        ;; ¿Quién controla la sociedad? Democracia ↔ Captura ↔ Autoritarismo
+        let n-extractors count turtles with [
+            meta-anchor-strength < 0.30 and count my-links > 5
+            and (M_E / max (list 1 M_E_max)) > 0.3
+            and mean [M_E / max (list 1 M_E_max)] of link-neighbors < 0.25
+        ]
+        ;; Detectar líder con anclajes personales sobre >5 seguidores
+        let captor count turtles with [
+            (M_E / max (list 1 M_E_max)) > 0.5
+            and count my-links > 8
+            and count turtles with [
+                not empty? filter [p -> item 2 p = [who] of myself] anchored-expect
+            ] > 5
+        ]
+        ifelse meta-anchor-strength > 0.30 and P_vital > 0.5 [
+            report "DEMOCRACIA FUNCIONAL"
+        ] [
+        ifelse captor > 0 and meta-anchor-strength > 0.10 [
+            report "CAPTURA DEMOCRATICA EN CURSO"
+        ] [
+        ifelse meta-anchor-strength > 0.10 and n-extractors = 0 [
+            report "Democracia bajo presion"
+        ] [
+        ifelse n-extractors > 0 and rigid-frac < 0.15 [
+            report "AUTORITARISMO EMERGENTE"
+        ] [
+        ifelse n-extractors > 0 and rigid-frac >= 0.15 [
+            report "AUTORITARISMO CONSOLIDADO"
+        ] [
+        ifelse meta-anchor-strength < 0.05 and n-extractors = 0 [
+            report "Colapso post-autoritario"
+        ] [
+            report "Transicion"
+        ]]]]]]
+    end
+
+    ;; ─── REPORTERS DE IDENTIDAD MÚLTIPLE (§5.3) ───
+    to-report shares-group? [a b]
+        if empty? [group-ids] of a or empty? [group-ids] of b [report false]
+        report not empty? filter [g -> member? g [group-ids] of b] [group-ids] of a
+    end
+    to-report shares-inst? [a b]
+        if empty? [institution-ids] of a or empty? [institution-ids] of b [report false]
+        report not empty? filter [i -> member? i [institution-ids] of b] [institution-ids] of a
+    end
+    to-report has-inst? [a]
+        report not empty? [institution-ids] of a
+    end
+
+    to-report calc-lambda-encuentros
+    let n count turtles
+    let conec-factor avg-clustering * (mean [count link-neighbors] of turtles / 6)
+    if conec-factor > 1 [set conec-factor 1]
+    report n * rho * (0.5 + conec-factor) * 0.01
+    end
+
+    to-report calc-dEp-poblacional
+    let total-weighted 0
+    let n count turtles
+    if n = 0 [report dEpMu]
+    ask turtles [
+        let age-weight ifelse-value (age < 100) [
+        max (list 0.2 (age / 100))
+        ] [
+        ifelse-value (age < 300) [1.0] [max (list 0.3 (1 - (age - 300) / 500))]
+        ]
+        set total-weighted total-weighted + dEp * age-weight
+    ]
+    report total-weighted / n
+    end
+
+    to-report calc-demo-regime
+    let k-ratio kappa-ratio
+    let dEs-total dEs-eff + dEs-demo
+    let dEp-total max (list 0.01 dEp-poblacional)
+    let sf-ratio dEs-total / dEp-total
+    if k-ratio < 0.8 and sf-ratio < 0.7 [report 0]
+    if k-ratio > 1.2 and sf-ratio > 1.5 [report 2]
+    if k-ratio < 1.0 and sf-ratio < 0.5 [report 0]
+    report 1
+    end
+
+    to-report pop
+    report ifelse-value dynamic-pop? [count turtles] [n-agents]
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; IED — Intervención Externa Directa (§21.2)
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    to execute-ied
+        set ied-occurred? true set ied-tick ticks set ied-phase 1 set ied-phase-tick ticks
+        let rigid-now count turtles with [state = 3] / max (list 1 current-N)
+        output-print (word "[t=" ticks "] IED " ied-policy " | rigid=" precision (rigid-now * 100) 0 "% | meta=" precision meta-anchor-strength 3)
+        let n-autoritarios 0
+        ask turtles with [state = 3 and count my-links > 5] [
+            set state 4 set age-rigid 0 set M_E M_E_max * 0.15
+            set institution-ids [] set role-weights [] set M-int 0
+            set n-autoritarios n-autoritarios + 1
+        ]
+        if ied-policy = "benevolent"   [apply-benevolent-ied]
+        if ied-policy = "malevolent"   [apply-malevolent-ied]
+        if ied-policy = "restoration"  [apply-restoration-ied]
+    end
+
+    to ied-update
+        let t-in-phase ticks - ied-phase-tick
+        if ied-phase = 1 [
+            set dEs-eff max (list 0.5 (dEs-eff - 0.03))
+            ask turtles [set M_E min (list M_E_max (M_E + M_E_max * 0.004))]
+            if ied-policy = "benevolent"   [set ISS-pressure min (list 1 (ISS-pressure + 0.02))]
+            if ied-policy = "malevolent"   [set ISS-pressure max (list -1 (ISS-pressure - 0.01))]
+            if ied-policy = "restoration"  [set ISS-pressure ISS-pressure * 0.98]
+            if t-in-phase >= 30 [set ied-phase 2 set ied-phase-tick ticks]
+        ]
+        if ied-phase = 2 [
+            let dark-hubs turtles with [count my-links > 3 and M_Omega <= 2 and empty? institution-ids and M_E > M_E_max * 0.3 and state != 3]
+            if ied-policy = "benevolent" [
+                ask dark-hubs [if random-float 1 < 0.08 [set state ifelse-value (random-float 1 < 0.5) [4] [2] set M_E M_E * 0.5 set institution-ids [] set role-weights []]]
+            ]
+            if ied-policy = "malevolent" [
+                ask dark-hubs [set M_E min (list M_E_max (M_E + M_E_max * 0.01)) set institutional-friction 0.6]
+            ]
+            if ied-policy = "restoration" [
+                ask dark-hubs [if random-float 1 < 0.05 [set institution-ids (list (word "coopt-" (random 4))) set role-weights (list (0.3 + random-float 0.3))]]
+            ]
+            if t-in-phase >= 50 [set ied-phase 3 set ied-phase-tick ticks]
+        ]
+        if ied-phase = 3 [
+            if ied-policy = "benevolent" [
+                if t-in-phase mod 5 = 0 [
+                    ask n-of max (list 1 round (current-N * 0.006)) turtles with [empty? institution-ids] [
+                        set institution-ids (list (word "inst-dem-" (random 5))) set role-weights (list (0.3 + random-float 0.4)) set institutional-friction 0
+                    ]
+                ]
+                set meta-anchor-strength min (list 0.45 (meta-anchor-strength + 0.0015))
+                set P_vital min (list 0.8 (P_vital + 0.0008))
+                set institutional-core-frac max (list institutional-core-frac (initial-pvital * 0.35 * (1 + avg-M_Omega / 15)))
+            ]
+            if ied-policy = "malevolent" [
+                if t-in-phase mod 10 = 0 [
+                    ask n-of max (list 1 round (current-N * 0.004)) turtles [
+                        set institution-ids (list (word "extract-" (random 3))) set role-weights (list 0.1) set institutional-friction 0.5
+                    ]
+                ]
+                set meta-anchor-strength max (list 0.08 (meta-anchor-strength + 0.0003))
+                set dEpMu max (list 0.5 (dEpMu - 0.002))
+            ]
+            if ied-policy = "restoration" [
+                if t-in-phase mod 8 = 0 [
+                    ask n-of max (list 1 round (current-N * 0.004)) turtles with [empty? institution-ids] [
+                        set institution-ids (list (word "trad-" (random 4))) set role-weights (list (0.4 + random-float 0.3)) set institutional-friction 0.2
+                    ]
+                ]
+                set meta-anchor-strength min (list 0.30 (meta-anchor-strength + 0.0008))
+            ]
+            if t-in-phase >= 100 [
+                set ied-phase 4 set ied-phase-tick ticks
+                if ied-policy = "benevolent" [
+                    set edu-M_Omega-bonus 1.5 set edu-sigma-bonus -0.15 set edu-dEp-bonus 0.3
+                    ask turtles with [age < 100] [
+                        let frac (1 - age / 100)
+                        set M_Omega min (list 15 (M_Omega + edu-M_Omega-bonus * frac))
+                        set sigma-pred-sh max (list 0.04 (sigma-pred-sh * (1 + edu-sigma-bonus * frac)))
+                        set dEp min (list 8 (dEp + edu-dEp-bonus * frac))
+                    ]
+                ]
+                if ied-policy = "malevolent" [set edu-M_Omega-bonus -0.5 set edu-sigma-bonus 0.10 set edu-dEp-bonus -0.3]
+                if ied-policy = "restoration" [set edu-M_Omega-bonus 0 set edu-sigma-bonus 0 set edu-dEp-bonus 0]
+            ]
+        ]
+    end
+
+    to apply-benevolent-ied
+        ask turtles [set M_E min (list M_E_max (M_E + M_E_max * 0.15))]
+        set dEpMu min (list 4.5 (dEpMu + 0.5)) set ISS-pressure 0.3
+    end
+
+    to apply-malevolent-ied
+        ask n-of max (list 1 round (current-N * 0.05)) turtles with [state != 3] [
+            set M_E M_E_max * 0.9 set sigma-pref-comp 0.9 set sigma-pref-per 0.1
+            set M_Omega 1 set M_Omega_floor 1 set institution-ids (list "extract-elite")
+            set role-weights (list 0.95) set institutional-friction 0.7
+        ]
+        set ISS-pressure -0.4 set dEpMu max (list 0.5 (dEpMu - 0.8))
+    end
+
+    to apply-restoration-ied
+        set dEs-eff max (list 1.0 (dEs-eff - 0.3)) set ISS-pressure 0.05
+        ask turtles with [count my-links > 5 and M_E > M_E_max * 0.4] [set institutional-friction 0.3]
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; SETUP RAPIDO — Hipotesis pre-configuradas
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; EXPERIMENTOS — Hipótesis Falsables sobre Mecanismos (§21-23)
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+
+    ;; ─── S1: SUPERFICIE DE ESTABILIDAD DEMOCRÁTICA ───
+    ;;   Barre initial-pvital × dEs para mapear la separatriz de colapso.
+    ;;   Predicción: existe dEs_crit(P_vital) por debajo de la cual
+    ;;   meta-anchor se preserva. S1-A (estable) vs S1-B (colapso).
+    to setup-S1-A
+        set n-agents 100  set dEs 2.0  set dEpMu 2.5
+        set mInit 100  set initial-pvital 0.75
+        set g-vuln-frac 0.12  set seed-network? true  set dynamic-pop? false
+        set ISS-active? true  set ied-policy "none"
+        setup
+        output-print "S1-A: ESTABLE — P_v=0.75 dEs=2.0 → meta-anchor debe > 0.4 en t=5000"
+        output-print "  Mecanismos: deliberación + filtro electoral preservan democracia."
+        output-print "  Falsaría si: meta-anchor < 0.3 en t=5000."
+    end
+
+    to setup-S1-B
+        set n-agents 100  set dEs 4.0  set dEpMu 2.0
+        set mInit 100  set initial-pvital 0.45
+        set g-vuln-frac 0.12  set seed-network? true  set dynamic-pop? false
+        set ISS-active? true  set ied-policy "none"
+        setup
+        output-print "S1-B: COLAPSO — P_v=0.45 dEs=4.0 → meta-anchor debe < 0.10 en t=3000"
+        output-print "  Mecanismos: deliberación OFF, demonización ON, sin filtro electoral."
+        output-print "  Falsaría si: meta-anchor > 0.25 en t=3000."
+    end
+
+    ;; ─── S2: CASCADA ECOLÓGICA SCHELLING → N_SR ───
+    ;;   Múltiples grupos identitarios + Schelling activo.
+    ;;   Sin estrés macro (dEs bajo). La topología sola destruye el meta-anclaje.
+    ;;   S2-A (2 grupos, baja fragmentación) vs S2-B (5 grupos, alta fragmentación).
+    to setup-S2-A
+        set n-agents 100  set dEs 1.5  set dEpMu 2.5
+        set mInit 100  set initial-pvital 0.70
+        set g-vuln-frac 0.10  set seed-network? true  set dynamic-pop? false
+        set ISS-active? false  set ied-policy "none"
+        setup
+        ;; Sobrescribir grupos: solo 2 grupos grandes (50/50)
+        ask turtles [
+            set group-ids [] set identity-cohesion [] set institution-ids [] set role-weights [] set break-memory []
+        set edu-level 0
+        set children-count 0
+        ]
+        ask n-of 50 turtles [set group-ids (list 1) set identity-cohesion (list (0.6 + random-float 0.3))]
+        ask turtles with [empty? group-ids] [set group-ids (list 2) set identity-cohesion (list (0.6 + random-float 0.3))]
+        output-print "S2-A: 2 GRUPOS — baja fragmentación. dEs=1.5 sin presión externa."
+        output-print "  Predicción: segregación emerge pero NO produce N_SR."
+        output-print "  Falsaría si: σ_pred_exogrupo > 1.5 o N_SR emergen en <3000 ticks."
+    end
+
+    to setup-S2-B
+        set n-agents 120  set dEs 1.5  set dEpMu 2.5
+        set mInit 100  set initial-pvital 0.70
+        set g-vuln-frac 0.10  set seed-network? true  set dynamic-pop? false
+        set ISS-active? false  set ied-policy "none"
+        setup
+        ;; Sobrescribir grupos: 5 grupos (~20 agentes cada uno)
+        ask turtles [
+            set group-ids [] set identity-cohesion [] set institution-ids [] set role-weights [] set break-memory []
+        set edu-level 0
+        set children-count 0
+        ]
+        foreach [1 2 3 4 5] [g ->
+            ask n-of 24 turtles with [empty? group-ids] [
+                set group-ids (list g)
+                set identity-cohesion (list (0.7 + random-float 0.25))
+            ]
+        ]
+        output-print "S2-B: 5 GRUPOS — alta fragmentación. dEs=1.5 sin presión externa."
+        output-print "  Predicción: Schelling + estereotipos → N_SR en <2000 ticks."
+        output-print "  Falsaría si: avg-clustering < 0.4 en t=2000 o σ_pred_exogrupo < 1.0."
+    end
+
+    ;; ─── S3: DEMONIZACIÓN Y RUIDO Q ───
+    ;;   Un grupo minoritario (~12%), hostile forzado los primeros 500 ticks.
+    ;;   Mide tasa de inflación de σ_pred_exogrupo y recuperación post-cese.
+    to setup-S3
+        set n-agents 100  set dEs 2.5  set dEpMu 2.5
+        set mInit 100  set initial-pvital 0.50  set meta-anchor-strength 0.25
+        set g-vuln-frac 0.10  set seed-network? true  set dynamic-pop? false
+        set ISS-active? false  set ied-policy "none"
+        setup
+        ;; Crear un grupo minoritario (~12 agentes) + un hub demonizador
+        ask turtles [
+            set group-ids [] set identity-cohesion [] set institution-ids [] set role-weights [] set break-memory []
+        set edu-level 0
+        set children-count 0
+        ]
+        ask n-of 12 turtles [set group-ids (list 99) set identity-cohesion (list (0.5 + random-float 0.3))]
+        ask turtles with [empty? group-ids] [set group-ids (list 1) set identity-cohesion (list (0.4 + random-float 0.3))]
+        ;; Sembrar hub demonizador: alta centralidad, externo al grupo 99
+        ask n-of 1 turtles with [not member? 99 group-ids and count link-neighbors < 3] [
+            let peers other turtles with [not member? 99 group-ids and not link-neighbor? myself]
+            if any? peers [
+                create-links-with n-of 8 peers [
+                    set weight 0.8 set link-type 2
+                ]
+            ]
+            set sigma-pred-exogrupo 1.5
+        ]
+        output-print "S3: DEMONIZACIÓN — 12% minoría, hub sembrado, hostile forzado 500 ticks."
+        output-print "  Predicción: σ_pred_exogrupo > 2.0 en t=500, recuperación lenta (>1000 ticks)."
+        output-print "  Falsaría si: σ_pred_exogrupo < 1.0 en t=500 o recuperación en <300 ticks."
+    end
+
+    ;; ─── S4: VENTANA DE INTERVENCIÓN IED ───
+    ;;   El sistema colapsa naturalmente (~800 ticks). IED benévola se dispara
+    ;;   a diferentes delays post-colapso. Mide recuperación y recaída.
+    ;;   S4-A (temprano), S4-B (tardío), S4-C (malevolo como control).
+    to setup-S4-A
+        set n-agents 100  set dEs 3.5  set dEpMu 2.0
+        set mInit 100  set initial-pvital 0.45
+        set g-vuln-frac 0.12  set seed-network? true  set dynamic-pop? false
+        set ISS-active? false  set ied-policy "benevolent"
+        setup
+        output-print "S4-A: IED BENÉVOLA TEMPRANA — se dispara en rigid > 50% y meta < 0.03."
+        output-print "  Predicción: rigid-frac < 10% en 300 ticks post-IED (H-IED-1)."
+        output-print "  Falsaría si: rigid-frac > 10% post-300 ticks o recaída en <500 ticks."
+    end
+
+    to setup-S4-B
+        set n-agents 100  set dEs 3.5  set dEpMu 2.0
+        set mInit 100  set initial-pvital 0.35
+        set g-vuln-frac 0.20  set seed-network? true  set dynamic-pop? false
+        set ISS-active? false  set ied-policy "benevolent"
+        setup
+        output-print "S4-B: IED BENÉVOLA CON G_vuln=0.20 — alto riesgo genético."
+        output-print "  Predicción: incluso benévola fracasa (H-IED-4: rigid-frac > 10%)."
+        output-print "  Falsaría si: rigid-frac < 10% post-300 ticks con G_vuln > 0.20."
+    end
+
+    to setup-S4-C
+        set n-agents 100  set dEs 3.5  set dEpMu 2.0
+        set mInit 100  set initial-pvital 0.45
+        set g-vuln-frac 0.12  set seed-network? true  set dynamic-pop? false
+        set ISS-active? false  set ied-policy "malevolent"
+        setup
+        output-print "S4-C: IED MALÉVOLA — ocupación extractiva."
+        output-print "  Predicción: rebote de rigid-frac > pico pre-intervención (H-IED-2)."
+        output-print "  Falsaría si: rigid-frac no supera pico pre-intervención."
+    end
+
+    ;; ─── S5: COOPTACIÓN VS FRACTURA (BIFURCACIÓN DEL ISS) ───
+    ;;   Grupo disidente cohesionado (15% de N). ISS-pressure determina
+    ;;   si el régimen absorbe al líder (cooptación) o se fractura.
+    ;;   S5-A (ISS > 0, cooptación), S5-B (ISS < 0, fractura).
+    to setup-S5-A
+        set n-agents 100  set dEs 3.0  set dEpMu 2.0
+        set mInit 100  set initial-pvital 0.40
+        set g-vuln-frac 0.12  set seed-network? true  set dynamic-pop? false
+        set ISS-active? true  set ied-policy "none"
+        setup
+        ;; Forzar ISS-pressure > 0 (régimen tiene aliados externos → cooptación)
+        set ISS-pressure 0.4
+        ;; Sembrar grupo disidente: 15 agentes, alta cohesion, sin instituciones
+        ask turtles [
+            set group-ids [] set identity-cohesion [] set institution-ids [] set role-weights [] set break-memory []
+        set edu-level 0
+        set children-count 0
+        ]
+        ask n-of 15 turtles [
+            set group-ids (list 7) set identity-cohesion (list (0.75 + random-float 0.2))
+            set institution-ids [] set role-weights []
+            ;; Conectar densamente entre sí
+        ]
+        ask turtles with [member? 7 group-ids] [
+            let peers other turtles with [member? 7 group-ids and not link-neighbor? myself]
+            if any? peers [
+                create-links-with peers [
+                    set channel-weights [0.5 0.5 0.5 1.0]
+                    set weight 0.85 set link-type 2
+                ]
+            ]
+        ]
+        ;; El resto pertenece a otro grupo
+        ask turtles with [empty? group-ids] [set group-ids (list 1) set identity-cohesion (list (0.3 + random-float 0.3))]
+        output-print "S5-A: COOPTACIÓN — ISS=+0.4, grupo disidente 15% cohesionado."
+        output-print "  Predicción: líder cooptado, identity-cohesion disidente cae >50%."
+        output-print "  Falsaría si: el movimiento sobrevive cohesionado en t=2000."
+    end
+
+    to setup-S5-B
+        set n-agents 100  set dEs 3.0  set dEpMu 2.0
+        set mInit 100  set initial-pvital 0.40
+        set g-vuln-frac 0.12  set seed-network? true  set dynamic-pop? false
+        set ISS-active? true  set ied-policy "none"
+        setup
+        ;; Forzar ISS-pressure < 0 (régimen aislado → fractura)
+        set ISS-pressure -0.4
+        ask turtles [
+            set group-ids [] set identity-cohesion [] set institution-ids [] set role-weights [] set break-memory []
+        set edu-level 0
+        set children-count 0
+        ]
+        ask n-of 15 turtles [
+            set group-ids (list 7) set identity-cohesion (list (0.75 + random-float 0.2))
+            set institution-ids [] set role-weights []
+        ]
+        ask turtles with [member? 7 group-ids] [
+            let peers other turtles with [member? 7 group-ids and not link-neighbor? myself]
+            if any? peers [
+                create-links-with peers [
+                    set weight 0.85 set link-type 2
+                ]
+            ]
+        ]
+        ask turtles with [empty? group-ids] [set group-ids (list 1) set identity-cohesion (list (0.3 + random-float 0.3))]
+        output-print "S5-B: FRACTURA — ISS=−0.4, grupo disidente 15% cohesionado."
+        output-print "  Predicción: meta-anchor cae adicionalmente, líder NO cooptado."
+        output-print "  Falsaría si: meta-anchor > 0.25 en t=2000 o current-leader = 0."
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; S6 — EFECTIVIDAD DEL ISS: Presión Internacional como Preventivo del Colapso
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;;   §6.5b: ISS-pressure < 0 → presión desgasta autoritarismo.
+    ;;          ISS-pressure > 0 → aliados consolidan captura.
+    ;;          NOTA: el ISS ahora tiene signo correcto (meta-anchor RESTA).
+
+    to setup-S6-A
+        set n-agents 100  set dEs 3.5  set dEpMu 2.0
+        set mInit 100  set initial-pvital 0.50
+        set g-vuln-frac 0.12  set seed-network? true  set dynamic-pop? false
+        set ISS-active? true  set ied-policy "none"
+        setup
+        ;; Democracia débil que recibe presión → ISS naturalmente > 0
+        ;; (bajo meta-anchor + alta rigid → ISS compute produce presión)
+        set meta-anchor-strength 0.45
+        set ISS-pressure 0.0  ;; inicial — ISS lo computa de rigid-prominence
+        output-print "S6-A: ISS ACTIVO — meta=0.45, dEs=3.5, P_v=0.50"
+        output-print "  Γ_ISS computado de rigid-prominence (sin aliados)."
+        output-print "  Predicción: ISS drena M_E de extractores, frena el colapso."
+        output-print "  Falsaría si: rigid-frac > 0.15 en t=2000 (ISS insuficiente)."
+    end
+
+    to setup-S6-B
+        set n-agents 100  set dEs 3.5  set dEpMu 2.0
+        set mInit 100  set initial-pvital 0.50
+        set g-vuln-frac 0.12  set seed-network? true  set dynamic-pop? false
+        set ISS-active? false  set ied-policy "none"
+        setup
+        set meta-anchor-strength 0.45
+        set ISS-pressure 0.0
+        output-print "S6-B: ISS INACTIVO — mismo sistema que S6-A, sin presión externa."
+        output-print "  Predicción: rigid-frac > 15% en ~1500-2000 ticks."
+        output-print "  Mecanismo: sin ISS, no hay drenaje de M_E del régimen."
+        output-print "  Falsaría si: rigid-frac < 0.15 en t=2000."
+    end
+
+    to setup-S6-C
+        set n-agents 100  set dEs 3.5  set dEpMu 2.0
+        set mInit 100  set initial-pvital 0.50
+        set g-vuln-frac 0.12  set seed-network? true  set dynamic-pop? false
+        set ISS-active? true  set ied-policy "none"
+        setup
+        ;; Aliados externos sostienen al régimen → ISS se mantiene bajo
+        ;; Aunque rigid sea alto, ISS es > 0 (aliados compensan presión)
+        set meta-anchor-strength 0.25
+        set ISS-pressure 0.0  ;; inicial — ISS lo computa de rigid-prominence
+        output-print "S6-C: BAJO META-ANCLAJE — meta=0.25, dEs=3.5, P_v=0.50"
+        output-print "  El ISS ve alto rigid-frac → alta presión → drena M_E."
+        output-print "  Predicción: o el régimen cae por drenaje o resiste (MAD)."
+        output-print "  Falsaría si: rigid-frac > 0.20 en t=1500 y élite conserva >30% M_E."
+    end
+
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; INSTRUCCIONES DE INTERFAZ    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;; INSTRUCCIONES DE INTERFAZ
+    ;; ═══════════════════════════════════════════════════════════════════════════════
+    ;;
+    ;; CHOOSER:
+    ;;   ied-policy  "none" "benevolent" "malevolent" "restoration"
+    ;;
+    ;; SLIDERS:
+    ;;   n-agents      80   (1, 200, 1)
+    ;;   k-degree      6    (2, 20, 2)
+    ;;   pw-rewire     0.15 (0, 0.5, 0.05)
+    ;;   dEs           2.0  (0.3, 5.0, 0.05)
+    ;;   dEpMu         2.60 (0.5, 4.5, 0.1)
+    ;;   mInit         100  (20, 200, 5)
+    ;;   birth-rate    0.02 (0, 0.1, 0.005)  [dynamic-pop?]
+    ;;   death-rate    0.01 (0, 0.1, 0.005)  [dynamic-pop?]
+    ;;
+    ;; SLIDERS λ (calibrados):
+    ;;   lambda-dano   0.80 (0.05, 1.5, 0.05)
+    ;;   lambda-prod   0.20 (0.05, 1.5, 0.05)
+    ;;   lambda-rec    0.02 (0.01, 0.30, 0.01)
+    ;;   lambda-fric   0.20 (0.02, 0.50, 0.01)
+    ;;   lambda-aprend 0.015(0.001, 0.05, 0.001)
+    ;;   lambda-acople 0.015(0.001, 0.05, 0.001)
+    ;;
+    ;; SLIDERS EXOGENOS (priors poblacionales):
+    ;;   g-vuln-frac       0.15 (0, 0.50, 0.05) — prevalencia G_vuln
+    ;;   atipicidad-sist   0.10 (0, 0.40, 0.05) — fracción A_cog=1 (alta sistematización)
+    ;;   atipicidad-social 0.05 (0, 0.30, 0.05) — fracción A_cog=2 (social volátil)
+    ;;   early-adversity   0.05 (0, 0.30, 0.05) — fracción con σ_epi elevado al nacer
+    ;;   shMu  0.50 (0.05, 1.5, 0.05) — μ de σ_pred inicial
+    ;;   shSd  0.26 (0.01, 1.0, 0.01) — σ de σ_pred inicial
+    ;;   d-ter-frac 0.08 (0, 0.30, 0.01) — densidad inicial N_t
+    ;;   initial-pvital 0.60 (0.1, 0.95, 0.05) — baseline institucional
+    ;;   e-bio-regeneration 0.05 (0, 0.20, 0.01) — regeneración ambiental
+    ;;   alpha-crit 50 (10, 200, 5) — umbral A_load para bifurcación topológica
+    ;;   basal-rigid-frac 0.10 (0, 0.50, 0.05) — fracción G_vuln que arrancan rígidos
+    ;;
+    ;; PARÁMETROS DERIVADOS (computados en setup, no sliders):
+    ;;   institutional-core-frac = initial-pvital × 0.25 × (1 + avg-M_Omega/15)
+    ;;   recovery-floor = max(0.03, M_Omega_floor / 15 × 0.50) — per-agent
+    ;;
+    ;; SWITCHES: dynamic-pop? circumscription? seed-network? ISS-active?
+    ;;           auto-rebt? auto-log?
+    ;;
+    ;; BOTONES: setup go REBT Neuromod Meso Disconnect
+    ;;          setup-S1-A setup-S1-B setup-S2-A setup-S2-B setup-S3
+    ;;          setup-S4-A setup-S4-B setup-S4-C setup-S5-A setup-S5-B
+    ;;
+    ;; PLOTS (4):
+    ;;   1. "Espacio de Fase" — scatter M_E(x) vs M_Ω(y)
+    ;;      Pens: activo(cyan), aislado(yellow), cid(orange), rigido(red)
+    ;;      X: 0 a mInit*2, Y: 0 a 15. Auto-scale OFF. Point mode.
+    ;;   2. "Paisaje de Bifurcacion" — A_load÷50, Var(M_Ω), rigid-frac
+    ;;   3. "Inecuacion Termodinamica" — dEs-eff÷5, dEp+prestado, Gap÷5
+    ;;   4. "Expectativas y Previsibilidad" — P_vital, densidad-links, SD(expect), meta-anchor
+    ;;   Todos Y: 0 a 1.2, auto-scale OFF.
+    ;;
+    ;; MONITORS (7 estratégicos):
+    ;;   [ρ_rigid]  pct-rigid
+    ;;   [P_vital]  current-pvital
+    ;;   [Ω_cap]    current-clustering
+    ;;   [Δf]       current-gap
+    ;;   [α_mean]   current-aload
+    ;;   [σ²(M_Ω)]  current-momega-var
+    ;;   [Régimen]  current-regime-str
+    ;;   [Extractores] current-extractors  (H5)
+    ;;   [Efecto ISS] current-iss-effect   (H5)
+    ;;   [Control]    current-control      (H5)
+    ;; ═══════════════════════════════════════════════════════════════════════════════
